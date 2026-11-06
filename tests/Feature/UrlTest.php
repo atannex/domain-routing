@@ -15,12 +15,12 @@ beforeEach(function () {
         Route::get('/dashboard', EchoController::class)->name('dashboard');
         Route::get('/projects/{project}', EchoController::class)->name('project');
     });
-    Route::get('/links', fn () => response()->json([
+    Route::site('app', fn () => Route::get('/links', fn () => response()->json([
         'pricing' => route('marketing.pricing'),
         'dashboard' => route('app.dashboard', ['account' => 'other']),
         'mine' => route('app.dashboard'),
         'relative' => route('app.dashboard', ['account' => 'x'], false),
-    ]));
+    ])));
 });
 
 it('roots each route at its site host', function () {

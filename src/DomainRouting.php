@@ -13,8 +13,10 @@ use Atannex\DomainRouting\Resolution\SiteMatch;
 use Atannex\DomainRouting\Resolution\SiteResolver;
 use Atannex\DomainRouting\Sites\Site;
 use Atannex\DomainRouting\Sites\SiteRegistry;
+use Atannex\DomainRouting\Urls\SiteRoot;
 use Closure;
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Support\Facades\URL;
 
 /** The package's front door (facade: DomainRouting). */
 final class DomainRouting
@@ -66,7 +68,14 @@ final class DomainRouting
             $site = new SiteMatch($definition, $host, $parameters, SiteMatch::EXACT);
         }
 
-        return $this->app->make(SiteContext::class)->run($site, $callback);
+        $root = SiteRoot::current();
+        SiteRoot::force($site);
+
+        try {
+            return $this->app->make(SiteContext::class)->run($site, $callback);
+        } finally {
+            URL::forceRootUrl($root);
+        }
     }
 
     /** @param array<array-key, mixed> $parameters */

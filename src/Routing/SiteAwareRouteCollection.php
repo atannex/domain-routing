@@ -8,7 +8,9 @@ use Illuminate\Routing\RouteCollection;
 
 /**
  * @internal Laravel keys routes by domain + URI, so "/" on two sites would
- * overwrite each other. Key them by site too; the SiteValidator picks one.
+ * overwrite each other: key them by site too. Matching tries the current
+ * site's own routes before routes that belong to no site, whatever order
+ * they were registered in (routes/web.php loads before site route files).
  */
 final class SiteAwareRouteCollection extends RouteCollection
 {
@@ -34,5 +36,32 @@ final class SiteAwareRouteCollection extends RouteCollection
         }
 
         $this->allRoutes[implode('|', $methods).$key] = $route;
+    }
+
+    protected function matchAgainstRoutes(array $routes, $request, $includingMethod = true)
+    {
+        $site = $request->attributes->get(SiteValidator::ATTRIBUTE);
+        $tiers = [[], [], [], [], []];
+
+        // Site routes, package endpoints, unsited routes, then the site's fallback before a global one.
+        foreach ($routes as $route) {
+            $owner = SiteValidator::siteOf($route->action);
+            $rank = $owner === null ? 2 : ($owner === SiteValidator::ANY ? 1 : 0);
+            $tiers[$route->isFallback ? ($rank === 2 ? 4 : 3) : $rank][] = $route;
+        }
+
+        if ($site === null) {
+            $tiers = [[...$tiers[0], ...$tiers[1], ...$tiers[2]], [...$tiers[3], ...$tiers[4]]];
+        }
+
+        foreach ($tiers as $tier) {
+            foreach ($tier as $route) {
+                if ($route->matches($request, $includingMethod)) {
+                    return $route;
+                }
+            }
+        }
+
+        return null;
     }
 }

@@ -17,12 +17,12 @@ it('accepts a plain list for every environment and marks dynamic sites', functio
     expect($site->dynamic)->toBeTrue()->and($site->hosts)->toBe([]);
 });
 
-it('lets an environment variable replace the hosts', function () {
-    putenv('DOMAIN_ROUTING_HOSTS_MY_APP=one.test, two.test');
+it('lets DOMAIN_ROUTING_HOSTS replace the hosts', function () {
+    $overrides = Site::parseOverrides(' my-app = one.test, two.test ; other=x.test ; broken ; =y.test');
 
-    expect(Site::fromArray('my-app', ['hosts' => ['x.test']], 'local')->hosts)->toBe(['one.test', 'two.test']);
-
-    putenv('DOMAIN_ROUTING_HOSTS_MY_APP');
+    expect($overrides)->toBe(['my-app' => ['one.test', 'two.test'], 'other' => ['x.test']])
+        ->and(Site::fromArray('my-app', ['hosts' => ['x.test']], 'local', $overrides)->hosts)->toBe(['one.test', 'two.test'])
+        ->and(Site::fromArray('third', ['hosts' => ['z.test']], 'local', $overrides)->hosts)->toBe(['z.test']);
 });
 
 it('derives the canonical host', function () {

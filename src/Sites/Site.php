@@ -6,7 +6,6 @@ namespace Atannex\DomainRouting\Sites;
 
 use Atannex\DomainRouting\Hosts\HostNormalizer;
 use Atannex\DomainRouting\Hosts\HostPattern;
-use Illuminate\Support\Env;
 
 /** A named surface served on its own hosts. Immutable. */
 final readonly class Site
@@ -37,12 +36,16 @@ final readonly class Site
         public ?string $robots = null,
         public ?string $assetUrl = null,
         public array $meta = [],
+        public ?bool $unsited = null,
     ) {}
 
-    /** @param array<string, mixed> $config */
-    public static function fromArray(string $name, array $config, string $environment): self
+    /**
+     * @param  array<string, mixed>  $config
+     * @param  array<string, list<string>>  $overrides  site => hosts, from DOMAIN_ROUTING_HOSTS
+     */
+    public static function fromArray(string $name, array $config, string $environment, array $overrides = []): self
     {
-        $hosts = self::hostsFor($name, $config['hosts'] ?? [], $environment);
+        $hosts = $overrides[$name] ?? self::hostsFor($config['hosts'] ?? [], $environment);
         $dynamic = in_array(self::DYNAMIC, $hosts, true);
         $hosts = array_values(array_filter($hosts, fn (string $host) => $host !== self::DYNAMIC));
         $where = (array) ($config['where'] ?? []);
@@ -65,18 +68,34 @@ final readonly class Site
             robots: isset($config['robots']) ? (string) $config['robots'] : null,
             assetUrl: isset($config['asset_url']) ? rtrim((string) $config['asset_url'], '/') : null,
             meta: (array) ($config['meta'] ?? []),
+            unsited: isset($config['unsited_routes']) ? (bool) $config['unsited_routes'] : null,
         );
     }
 
-    /** @return list<string> */
-    private static function hostsFor(string $name, mixed $hosts, string $environment): array
+    /**
+     * "app=a.com,b.com;marketing=x.com" → ['app' => ['a.com', 'b.com'], 'marketing' => ['x.com']].
+     *
+     * @return array<string, list<string>>
+     */
+    public static function parseOverrides(?string $value): array
     {
-        $override = Env::get('DOMAIN_ROUTING_HOSTS_'.strtoupper((string) preg_replace('/[^A-Za-z0-9]/', '_', $name)));
+        $overrides = [];
 
-        if (is_string($override) && trim($override) !== '') {
-            return array_values(array_filter(array_map('trim', explode(',', $override))));
+        foreach (array_filter(array_map('trim', explode(';', (string) $value))) as $entry) {
+            [$site, $hosts] = array_pad(explode('=', $entry, 2), 2, '');
+            $hosts = array_values(array_filter(array_map('trim', explode(',', $hosts))));
+
+            if (trim($site) !== '' && $hosts !== []) {
+                $overrides[trim($site)] = $hosts;
+            }
         }
 
+        return $overrides;
+    }
+
+    /** @return list<string> */
+    private static function hostsFor(mixed $hosts, string $environment): array
+    {
         $hosts = (array) $hosts;
 
         if (! array_is_list($hosts)) {
@@ -126,7 +145,7 @@ final readonly class Site
         }
 
         return new self($this->name, $this->hosts, $this->dynamic, $this->canonical, $this->scheme, $this->port, $this->routes,
-            [$middleware, ...$this->middleware], $this->where, $this->session, $this->redirects, $this->robots, $this->assetUrl, $this->meta);
+            [$middleware, ...$this->middleware], $this->where, $this->session, $this->redirects, $this->robots, $this->assetUrl, $this->meta, $this->unsited);
     }
 
     /** Is the given host (already normalised) one of this site's exact hosts? */

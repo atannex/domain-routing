@@ -7,6 +7,7 @@ namespace Atannex\DomainRouting;
 use Atannex\DomainRouting\Edge\MaintenanceStore;
 use Atannex\DomainRouting\Hosts\Extensions;
 use Atannex\DomainRouting\Hosts\HostBuilder;
+use Atannex\DomainRouting\Hosts\HostPattern;
 use Atannex\DomainRouting\Hosts\IndexCache;
 use Atannex\DomainRouting\Http\Controllers\HandoffController;
 use Atannex\DomainRouting\Http\Controllers\RobotsController;
@@ -23,6 +24,7 @@ use Atannex\DomainRouting\Routing\SiteAwareCompiledRouteCollection;
 use Atannex\DomainRouting\Routing\SiteAwareRouteCollection;
 use Atannex\DomainRouting\Routing\SiteRoutes;
 use Atannex\DomainRouting\Routing\SiteValidator;
+use Atannex\DomainRouting\Sites\Site;
 use Atannex\DomainRouting\Sites\SiteRegistry;
 use Atannex\DomainRouting\Urls\SiteUrlGenerator;
 use Illuminate\Contracts\Http\Kernel;
@@ -50,7 +52,13 @@ final class DomainRoutingServiceProvider extends ServiceProvider
         $this->app->singleton(Extensions::class);
 
         $this->app->singleton(SiteRegistry::class, function ($app): SiteRegistry {
-            $registry = SiteRegistry::fromConfig((array) $app['config']->get('domain-routing.sites', []), (string) $app->environment());
+            HostPattern::$reserved = array_values(array_map('strtolower', (array) $app['config']->get('domain-routing.reserved_labels', [])));
+
+            $registry = SiteRegistry::fromConfig(
+                (array) $app['config']->get('domain-routing.sites', []),
+                (string) $app->environment(),
+                Site::parseOverrides($app['config']->get('domain-routing.host_overrides')),
+            );
             $registry->useCache($app->make(IndexCache::class), $app->environment('local', 'testing'));
 
             return $registry;
@@ -78,7 +86,6 @@ final class DomainRoutingServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $config = $this->app['config'];
-        SiteValidator::$unsited = (string) $config->get('domain-routing.unsited_routes', SiteValidator::STATIC);
         SiteValidator::$shared = array_values(array_map('strval', (array) $config->get('domain-routing.shared_routes', [])));
 
         $extensions = $this->app->make(Extensions::class);

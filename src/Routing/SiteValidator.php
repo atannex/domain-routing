@@ -4,16 +4,15 @@ declare(strict_types=1);
 
 namespace Atannex\DomainRouting\Routing;
 
-use Atannex\DomainRouting\Resolution\SiteMatch;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Matching\ValidatorInterface;
 use Illuminate\Routing\Route;
 use Illuminate\Support\Str;
 
 /**
- * @internal A site's routes match only on that site. Routes outside any site
- * follow `unsited_routes`: everywhere, static (not on dynamic hosts such as
- * tenant custom domains, except the shared paths), or none.
+ * @internal A site's routes match only on that site. Whether routes outside
+ * any site answer is decided per request by ResolveSite (unsited_routes);
+ * shared_routes always do.
  */
 final class SiteValidator implements ValidatorInterface
 {
@@ -28,9 +27,12 @@ final class SiteValidator implements ValidatorInterface
 
     public const string STATIC = 'static';
 
-    public const string NONE = 'none';
+    public const string EXACT = 'exact';
 
-    public static string $unsited = self::STATIC;
+    /** Request attribute: may routes outside any site answer on this request's site? */
+    public const string UNSITED = 'domain-routing.unsited';
+
+    public const string NONE = 'none';
 
     /** @var list<string> URI patterns of unsited routes that are also served on dynamic hosts */
     public static array $shared = [];
@@ -58,11 +60,7 @@ final class SiteValidator implements ValidatorInterface
             return true;
         }
 
-        return match (self::$unsited) {
-            self::EVERYWHERE => true,
-            self::NONE => false,
-            default => $request->attributes->get(self::SOURCE) !== SiteMatch::PROVIDER || Str::is(self::$shared, $route->uri()),
-        };
+        return $request->attributes->get(self::UNSITED, true) === true || Str::is(self::$shared, $route->uri());
     }
 
     /** @param array<string, mixed> $action */

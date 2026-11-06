@@ -28,11 +28,11 @@ it('keeps the request site through a sync job and gives the job the site', funct
     config(['queue.default' => 'sync']);
     RecordSiteJob::$seen = [];
     Route::site('app', fn () => Route::get('/dashboard', EchoController::class)->name('dashboard'));
-    Route::get('/dispatch', function () {
+    Route::site('app', fn () => Route::get('/dispatch', function () {
         RecordSiteJob::dispatch();
 
         return response()->json(['after' => current_site()?->name()]);
-    });
+    }));
 
     $this->get('http://acme.app.test/dispatch')->assertJson(['after' => 'app']);
 

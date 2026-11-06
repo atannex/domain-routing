@@ -79,6 +79,14 @@ final class HostBuilder
 
     public function rootFor(Site $site, string $host): string
     {
-        return $this->scheme($site).'://'.$host.($site->port ? ':'.$site->port : '');
+        $port = $site->port;
+
+        // php artisan serve and other dev ports: keep the port the app is reached on.
+        if ($port === null && ! $this->app->environment('production') && $this->app->bound('request')) {
+            $requestPort = (int) $this->app['request']->getPort();
+            $port = in_array($requestPort, [0, 80, 443], true) ? null : $requestPort;
+        }
+
+        return $this->scheme($site).'://'.$host.($port ? ':'.$port : '');
     }
 }

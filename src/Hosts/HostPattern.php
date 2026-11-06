@@ -17,6 +17,9 @@ final class HostPattern
     /** @var array<string, self> */
     private static array $compiled = [];
 
+    /** @var list<string> labels a default-constrained parameter never takes (www, mail…) */
+    public static array $reserved = [];
+
     /**
      * @param  list<string>  $parameters
      * @param  array<string, string>  $constraints
@@ -135,7 +138,15 @@ final class HostPattern
             return null;
         }
 
-        return array_intersect_key($m, array_flip($this->parameters));
+        $values = array_intersect_key($m, array_flip($this->parameters));
+
+        foreach ($values as $name => $value) {
+            if ($this->constraints[$name] === self::DEFAULT_PARAMETER && in_array($value, self::$reserved, true)) {
+                return null;
+            }
+        }
+
+        return $values;
     }
 
     /** @param array<string, mixed> $values */
@@ -151,7 +162,8 @@ final class HostPattern
             $value = $values[$name] instanceof UrlRoutable ? $values[$name]->getRouteKey() : $values[$name];
             $value = strtolower((string) $value);
 
-            if (! preg_match('#^(?:'.$this->constraints[$name].')$#', $value)) {
+            if (! preg_match('#^(?:'.$this->constraints[$name].')$#', $value)
+                || ($this->constraints[$name] === self::DEFAULT_PARAMETER && in_array($value, self::$reserved, true))) {
                 throw InvalidHostParameter::for($site, $name, $value);
             }
 

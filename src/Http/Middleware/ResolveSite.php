@@ -13,20 +13,28 @@ use Atannex\DomainRouting\Resolution\SiteContext;
 use Atannex\DomainRouting\Resolution\SiteMatch;
 use Atannex\DomainRouting\Resolution\SiteResolver;
 use Atannex\DomainRouting\Routing\SiteValidator;
+use Atannex\DomainRouting\Sites\Site;
 use Atannex\DomainRouting\Sites\SiteRegistry;
 use Atannex\DomainRouting\Urls\SiteUrlGenerator;
 use Closure;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\URL;
 use Symfony\Component\HttpFoundation\Response;
 
-/** Global: request host → site. Runs after TrustProxies and before the session starts. */
+/**
+ * Global: request host → site. Runs after TrustProxies and before the session
+ * starts. What it changes for the request (session cookie scope, forced root,
+ * log context, site context) is put back in terminate(), after the response
+ * and any after-response work, so long-running workers start clean.
+ */
 final class ResolveSite
 {
     private const array SESSION_KEYS = ['cookie', 'domain', 'path', 'secure', 'same_site', 'partitioned'];
+
+    private const string RESTORE = 'domain-routing.restore';
 
     public function __construct(
         private readonly SiteRegistry $sites,
@@ -37,15 +45,11 @@ final class ResolveSite
 
     public function handle(Request $request, Closure $next): Response
     {
-        $previous = $this->context->current();
+        // Never inherit a site from an earlier request on this process.
         $this->context->set(null);
 
         if ($this->sites->isEmpty() || $request->is(...(array) config('domain-routing.except', []))) {
-            try {
-                return $next($request);
-            } finally {
-                $this->context->set($previous);
-            }
+            return $next($request);
         }
 
         $match = $this->resolver->resolve($request->getHost());
@@ -59,38 +63,38 @@ final class ResolveSite
             }
         }
 
-        // Everything changed for this request is put back afterwards (Octane, workers, tests).
-        $config = $this->sessionConfig();
-        $url = app('url');
-        $root = $url instanceof SiteUrlGenerator ? $url->forcedRoot() : null;
+        $this->enter($request, $match);
 
-        try {
-            $this->enter($request, $match);
+        $response = $next($request);
 
-            $response = $next($request);
-
-            if (config('domain-routing.debug_header')) {
-                $response->headers->set('X-Site', $match->name());
-            }
-
-            return $response;
-        } finally {
-            config($config);
-            URL::forceRootUrl($root);
-            $this->context->set($previous);
+        if (config('domain-routing.debug_header')) {
+            $response->headers->set('X-Site', $match->name());
         }
+
+        return $response;
     }
 
-    /** @return array<string, mixed> */
-    private function sessionConfig(): array
+    public function terminate(Request $request, Response $response): void
     {
-        $values = [];
+        $saved = $request->attributes->get(self::RESTORE);
 
-        foreach (self::SESSION_KEYS as $key) {
-            $values['session.'.$key] = config('session.'.$key);
+        if (! is_array($saved)) {
+            return;
         }
 
-        return $values;
+        config($saved['config']);
+        URL::forceRootUrl($saved['root']);
+        Context::forget(['site', 'site_host', 'site_source']);
+
+        if (app()->resolved('cookie')) {
+            app('cookie')->setDefaultPathAndDomain(
+                $saved['config']['session.path'], $saved['config']['session.domain'],
+                (bool) $saved['config']['session.secure'], $saved['config']['session.same_site'],
+            );
+        }
+
+        $this->context->set(null);
+        $request->attributes->remove(self::RESTORE);
     }
 
     private function fallback(Request $request): SiteMatch|Response
@@ -103,10 +107,14 @@ final class ResolveSite
 
         $default = config('domain-routing.default');
 
+        // Only a site with a fixed host may stand in: links must never be rooted at the forged Host header.
         if ($policy === 'default' && is_string($default) && $this->sites->has($default)) {
             $site = $this->sites->get($default);
+            $host = $site->canonicalHost();
 
-            return new SiteMatch($site, $site->canonicalHost() ?? HostNormalizer::normalize($request->getHost()), [], SiteMatch::DEFAULT);
+            if ($host !== null && ! $site->dynamic) {
+                return new SiteMatch($site, $host, [], SiteMatch::DEFAULT);
+            }
         }
 
         throw new SiteNotFound(HostNormalizer::normalize($request->getHost()));
@@ -114,28 +122,82 @@ final class ResolveSite
 
     private function enter(Request $request, SiteMatch $match): void
     {
+        $url = app('url');
+
+        $request->attributes->set(self::RESTORE, [
+            'config' => $this->sessionConfig(),
+            'root' => $url instanceof SiteUrlGenerator ? $url->forcedRoot() : null,
+        ]);
+
         $this->context->set($match);
         $request->attributes->set(SiteValidator::ATTRIBUTE, $match->name());
         $request->attributes->set(SiteValidator::SOURCE, $match->source);
+        $request->attributes->set(SiteValidator::UNSITED, $this->unsitedAllowed($match));
 
-        Log::withContext(['site' => $match->name(), 'site_host' => $match->host, 'site_source' => $match->source]);
+        Context::add(['site' => $match->name(), 'site_host' => $match->host, 'site_source' => $match->source]);
 
-        // An unknown Host header must never become the root of generated links.
-        if ($match->source === SiteMatch::DEFAULT && $match->site->canonicalHost() !== null) {
+        if ($match->source === SiteMatch::DEFAULT) {
             URL::forceRootUrl(app(HostBuilder::class)->rootFor($match->site, $match->host));
         }
 
-        // Cookies stay on this host unless the site shares them on purpose (session.domain).
-        if (config('domain-routing.isolate_sessions', true) && ! array_key_exists('domain', $match->site->session)) {
-            config(['session.domain' => null]);
+        $this->applySession($match->site);
+
+        $this->events->dispatch(new SiteResolved($match));
+    }
+
+    /** Session and cookie scope for this site; cookies stay on the exact host unless the site shares them. */
+    private function applySession(Site $site): void
+    {
+        $session = $site->session;
+
+        if (config('domain-routing.isolate_sessions', true) && ! array_key_exists('domain', $session)) {
+            $session['domain'] = null;
+        }
+
+        // A site that shares its cookie with a parent domain gets its own cookie name,
+        // so sibling sites never receive (and load) its session.
+        if (! empty($session['domain']) && ! array_key_exists('cookie', $session)) {
+            $session['cookie'] = config('session.cookie').'_'.preg_replace('/[^a-z0-9_]/i', '_', $site->name);
         }
 
         foreach (self::SESSION_KEYS as $key) {
-            if (array_key_exists($key, $match->site->session)) {
-                config(['session.'.$key => $match->site->session[$key]]);
+            if (array_key_exists($key, $session)) {
+                config(['session.'.$key => $session[$key]]);
             }
         }
 
-        $this->events->dispatch(new SiteResolved($match));
+        // Remember-me and queued cookies take their defaults from the jar, not from config.
+        if (app()->resolved('cookie')) {
+            app('cookie')->setDefaultPathAndDomain(
+                config('session.path'), config('session.domain'), (bool) config('session.secure'), config('session.same_site'),
+            );
+        }
+    }
+
+    /** Do routes outside any site answer here? Site setting first, then unsited_routes. */
+    private function unsitedAllowed(SiteMatch $match): bool
+    {
+        if ($match->site->unsited !== null) {
+            return $match->site->unsited;
+        }
+
+        return match ((string) config('domain-routing.unsited_routes', SiteValidator::EXACT)) {
+            SiteValidator::EVERYWHERE => true,
+            SiteValidator::NONE => false,
+            SiteValidator::STATIC => $match->source !== SiteMatch::PROVIDER,
+            default => in_array($match->source, [SiteMatch::EXACT, SiteMatch::DEFAULT], true),
+        };
+    }
+
+    /** @return array<string, mixed> */
+    private function sessionConfig(): array
+    {
+        $values = [];
+
+        foreach (self::SESSION_KEYS as $key) {
+            $values['session.'.$key] = config('session.'.$key);
+        }
+
+        return $values;
     }
 }

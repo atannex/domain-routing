@@ -51,7 +51,9 @@ final class CanonicalTarget
         }
 
         $target = $this->url($scheme, $host, $port, $path, $query);
-        $current = $this->url($request->getScheme(), $match->host, in_array((int) $request->getPort(), [80, 443], true) ? null : (int) $request->getPort(), $request->getPathInfo(), $query);
+        // The raw host, so "Example.com." is sent on to "example.com" (a separate cookie origin otherwise).
+        $raw = (string) preg_replace('/:\d+$/', '', (string) $request->server->get('HTTP_HOST', $request->getHost()));
+        $current = $this->url($request->getScheme(), $raw, in_array((int) $request->getPort(), [80, 443], true) ? null : (int) $request->getPort(), $request->getPathInfo(), $query);
 
         return $target === $current ? null : [$target, $status];
     }

@@ -31,10 +31,17 @@ final class SiteRegistry
         }
     }
 
-    /** @param array<string, array<string, mixed>> $sites */
-    public static function fromConfig(array $sites, string $environment): self
+    /** @var array<string, list<string>> */
+    private array $overrides = [];
+
+    /**
+     * @param  array<string, array<string, mixed>>  $sites
+     * @param  array<string, list<string>>  $overrides
+     */
+    public static function fromConfig(array $sites, string $environment, array $overrides = []): self
     {
         $registry = new self;
+        $registry->overrides = $overrides;
 
         foreach ($sites as $name => $config) {
             $registry->define((string) $name, (array) $config, $environment);
@@ -52,7 +59,7 @@ final class SiteRegistry
 
         $this->index = null;
 
-        return $this->sites[$name] = Site::fromArray($name, $config, $environment);
+        return $this->sites[$name] = Site::fromArray($name, $config, $environment, $this->overrides);
     }
 
     public function replace(Site $site): void

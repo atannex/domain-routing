@@ -8,7 +8,8 @@ return [
      * environment => list with '*' as the fallback. A host is exact
      * ("atannex.com"), parameterised ("{account}.atannex.com") or the word
      * "dynamic" (asked of HostProviders, e.g. verified tenant domains).
-     * Override a site's hosts with DOMAIN_ROUTING_HOSTS_{SITE}=a.com,b.com.
+     * Override hosts per deployment with DOMAIN_ROUTING_HOSTS="app=a.com,b.com;marketing=x.com"
+     * (read here, so it survives config:cache).
      *
      * 'marketing' => [
      *     'hosts' => ['production' => ['atannex.com', 'www.atannex.com'], 'local' => ['atannex.test']],
@@ -23,9 +24,15 @@ return [
      *     'robots' => null,         // robots.txt body; null = allow in production, disallow elsewhere
      *     'asset_url' => null,
      *     'meta' => [],             // free-form (locale, brand…)
+     *     'unsited_routes' => null, // true/false: do routes outside any site answer here?
      * ],
      */
     'sites' => [],
+
+    'host_overrides' => env('DOMAIN_ROUTING_HOSTS'),
+
+    // A default {parameter} never matches these labels, so www.example.com is never account "www".
+    'reserved_labels' => ['www', 'mail', 'smtp', 'imap', 'pop', 'ftp', 'ns1', 'ns2', 'mx', 'webmail', 'autodiscover', 'cpanel'],
 
     // Site used when no host matches and 'unmatched' is 'default'.
     'default' => null,
@@ -48,12 +55,15 @@ return [
     ],
 
     /*
-     * Routes outside any site: everywhere | static | none.
-     * static (default) serves them on exact and pattern hosts but never on
-     * dynamic hosts (tenant custom domains), so central and admin routes can't
-     * leak onto a tenant's domain. shared_routes are the exceptions (URI patterns).
+     * Routes outside any site (routes/web.php): where do they answer?
+     *   exact (default): on sites matched by an exact host, and when no site resolved;
+     *                    never on {account}.example.com or dynamic (tenant) hosts.
+     *   static:          also on pattern hosts, never on dynamic hosts.
+     *   everywhere | none.
+     * A site's own 'unsited_routes' => true|false wins. shared_routes (URI patterns)
+     * always answer, e.g. Livewire and broadcasting endpoints.
      */
-    'unsited_routes' => 'static',
+    'unsited_routes' => 'exact',
 
     'shared_routes' => ['livewire*', 'broadcasting/*', 'sanctum/*', 'storage/*', 'up'],
 

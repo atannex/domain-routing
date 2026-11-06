@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Atannex\DomainRouting\Events\SiteNotResolved;
 use Atannex\DomainRouting\Events\SiteResolved;
+use Atannex\DomainRouting\Exceptions\InvalidHostParameter;
 use Atannex\DomainRouting\Tests\Fixtures\Controllers\EchoController;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
@@ -15,8 +16,39 @@ beforeEach(function () {
 });
 
 it('resolves the site from the host', function () {
-    $this->get('http://ACME.app.test/whoami')->assertOk()->assertJson(['site' => 'app']);
+    Route::site('app', fn () => Route::get('/whoami', EchoController::class));
+
+    $this->get('http://acme.app.test/whoami')->assertOk()->assertJson(['site' => 'app']);
     $this->get('http://atannex.test/whoami')->assertJson(['site' => 'marketing']);
+});
+
+it('sends mixed-case and trailing-dot hosts to the normal host', function () {
+    $this->get('http://ATANNEX.test/whoami')->assertRedirect('http://atannex.test/whoami');
+    $this->get('http://atannex.test./whoami')->assertRedirect('http://atannex.test/whoami');
+});
+
+it('keeps unsited routes off pattern hosts by default', function () {
+    $this->get('http://acme.app.test/whoami')->assertNotFound();
+
+    $this->withSettings(['domain-routing.unsited_routes' => 'static']);
+    Route::get('/whoami', EchoController::class);
+    $this->get('http://acme.app.test/whoami')->assertOk();
+});
+
+it('lets a site opt in to unsited routes', function () {
+    $this->withSites(['app' => ['hosts' => ['{account}.app.test'], 'unsited_routes' => true]]);
+    Route::get('/whoami', EchoController::class);
+
+    $this->get('http://acme.app.test/whoami')->assertOk();
+});
+
+it('never treats reserved labels as a parameter', function () {
+    $this->withSites(['app' => ['hosts' => ['{account}.atannex.test']]]);
+    Route::site('app', fn () => Route::get('/whoami', EchoController::class)->name('home'));
+
+    $this->get('http://www.atannex.test/whoami')->assertNotFound();
+    $this->get('http://acme.atannex.test/whoami')->assertOk();
+    expect(fn () => route('app.home', ['account' => 'www']))->toThrow(InvalidHostParameter::class);
 });
 
 it('answers 404 for unknown hosts and dispatches SiteNotResolved', function () {
