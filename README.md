@@ -92,6 +92,29 @@ Jobs remember the site they were dispatched from, and `url()`, `asset()` and uns
 
 A site with `'canonical' => 'atannex.com'` sends its other exact hosts there. `redirects` maps paths (`'/old' => '/new'` or `['to' => 'https://…', 'status' => 302]`). Non-GET requests on a non-canonical URL get `421` (or `308`). The middleware runs after `TrustProxies`, so TLS terminated at a proxy doesn't loop.
 
+## Per-site settings
+
+```php
+'shop' => [
+    'hosts' => ['shop.atannex.com'],
+    'config' => ['app.name' => 'Atannex Shop', 'app.locale' => 'fr'], // for this site's requests only
+    'views' => [resource_path('views/shop')],                        // searched first on this site
+    'stateful' => true,                                              // Sanctum SPA sign-in on this host
+],
+```
+
+Everything is put back after the response, and the view cache is flushed, so a site's views and settings never leak into the next request.
+
+Rate limits: `throttle:60,1` normally keys guests by route domain + IP. Site routes have no route domain, so every site would share one bucket. With `isolate_rate_limits` (on by default), the stock `throttle` alias keys by site and host too.
+
+HSTS: `canonical.hsts => 'max-age=31536000; includeSubDomains'` is sent on secure responses of https sites.
+
+Redirects: `redirect()->toSite('marketing', '/pricing')`, `redirect()->siteRoute('app', 'dashboard', ['account' => 'acme'])`.
+
+## On-demand TLS
+
+`tls_ask.enabled => true` answers `GET /domain-routing/tls/ask?domain=host` with 200 for any host a site serves (static, or a verified tenant domain through tenancy), and 404 otherwise. Point Caddy's `on_demand_tls { ask … }` at it. The path skips site resolution, so it works on `localhost`.
+
 ## Maintenance and robots
 
 ```bash
@@ -132,12 +155,20 @@ B then signs the user in only if the browser holds the matching state cookie. A 
 
 ```php
 'sites' => [
-    'central' => ['hosts' => ['atannex.com'], 'middleware' => ['web']],
+    'central' => ['hosts' => ['tenancy:central'], 'middleware' => ['web']], // tenancy's central domains
     'tenant' => ['hosts' => ['dynamic'], 'routes' => [base_path('routes/tenant.php')], 'middleware' => ['web']],
 ],
 ```
 
 Verified tenant domains and `{slug}.{central domain}` are served on `tenant`. Tenancy's `tenant` middleware is prepended to that site, and tenancy still identifies the tenant. Alias domains go to the primary in one hop. `route('tenant.orders', ['tenant' => $tenant])` links to the tenant's primary domain from anywhere. Tenancy itself needs no changes.
+
+How the two fit together:
+- Tenancy's impersonation and invitation routes also answer on tenant domains, and its TLS ask works from `localhost`.
+- `tenant_route()` and `route('tenant.…')` build the same link.
+- Tenancy's reserved slugs are never read as a host parameter.
+- Handoff and session stamps use a cache tenancy never prefixes.
+- `integrations.tenancy.central_site => 'central'` puts tenancy's `central` guard on the central site.
+- `domains:doctor` flags a `{param}.central` site that would swallow tenant subdomains, and central domains that no site serves.
 
 ## With atannex/routing
 
@@ -156,6 +187,7 @@ Implement `Contracts\HostProvider` (host → `SiteMatch` for a `dynamic` site) a
 | --- | --- |
 | `domains:list` | Sites, hosts in this environment, route counts |
 | `domains:resolve {host}` | Which site serves a host, and why |
+| `domains:routes {site?}` | Routes with the site they answer on (`-` for routes outside any site) |
 | `domains:cache` / `domains:clear` | Compile the host index (also run by `optimize`) |
 | `domains:doctor` | Ambiguous hosts, missing hosts, stale cache, tenancy overlap, handoff store, unsited routes on tenant hosts; non-zero exit for CI |
 | `domains:down {site}` / `domains:up {site}` | Per-site maintenance |

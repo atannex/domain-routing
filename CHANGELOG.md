@@ -12,7 +12,9 @@ All notable changes to this project are documented here. The format follows [Kee
 - Per-site maintenance (`domains:down`/`domains:up`) and robots.txt.
 - Cross-domain sign-in handoff and per-user session stamps.
 - atannex/tenancy adapter (`TenancyHostProvider`, `TenancyHostParameters`).
-- `domains:list`, `domains:resolve`, `domains:doctor`; testing helpers; `@site` Blade directive.
+- `domains:list`, `domains:resolve`, `domains:routes`, `domains:doctor`; testing helpers; `@site` Blade directive.
+- Per-site `config`, `views` and Sanctum `stateful` hosts; HSTS; per-site rate-limit buckets; on-demand TLS ask endpoint; `redirect()->toSite()` / `siteRoute()`.
+- atannex/tenancy alignment: `tenancy:central` hosts, shared impersonation/invitation routes, TLS ask path, reserved slugs, central guard option, same scheme as `tenant_route()`.
 
 ### Security
 - Routes outside any site stay off pattern and dynamic hosts by default (`unsited_routes: exact`, `shared_routes`); a site's own routes and fallback always win.
