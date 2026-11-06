@@ -6,6 +6,7 @@ namespace Atannex\DomainRouting\Http\Middleware;
 
 use Atannex\DomainRouting\Edge\CanonicalTarget;
 use Atannex\DomainRouting\Events\CanonicalRedirected;
+use Atannex\DomainRouting\Hosts\HostBuilder;
 use Atannex\DomainRouting\Resolution\SiteContext;
 use Atannex\DomainRouting\Resolution\SiteMatch;
 use Closure;
@@ -29,7 +30,7 @@ final class Canonicalize
         $target = $this->target->for($request, $match);
 
         if ($target === null) {
-            return $next($request);
+            return $this->hsts($request, $match, $next($request));
         }
 
         [$url, $status] = $target;
@@ -45,5 +46,18 @@ final class Canonicalize
         event(new CanonicalRedirected($request->fullUrl(), $url, $status));
 
         return new RedirectResponse($url, $status);
+    }
+
+    /** Strict-Transport-Security on secure responses of https sites, when configured. */
+    private function hsts(Request $request, SiteMatch $match, Response $response): Response
+    {
+        $header = config('domain-routing.canonical.hsts');
+
+        if (is_string($header) && $header !== '' && $request->isSecure() && app(HostBuilder::class)->scheme($match->site) === 'https'
+            && ! $response->headers->has('Strict-Transport-Security')) {
+            $response->headers->set('Strict-Transport-Security', $header);
+        }
+
+        return $response;
     }
 }

@@ -20,6 +20,8 @@ final readonly class Site
      * @param  array<string, mixed>  $session
      * @param  array<string, string|array{to: string, status?: int}>  $redirects
      * @param  array<string, mixed>  $meta
+     * @param  array<string, mixed>  $config
+     * @param  list<string>  $views
      */
     public function __construct(
         public string $name,
@@ -37,6 +39,9 @@ final readonly class Site
         public ?string $assetUrl = null,
         public array $meta = [],
         public ?bool $unsited = null,
+        public array $config = [],
+        public array $views = [],
+        public bool $stateful = false,
     ) {}
 
     /**
@@ -69,6 +74,9 @@ final readonly class Site
             assetUrl: isset($config['asset_url']) ? rtrim((string) $config['asset_url'], '/') : null,
             meta: (array) ($config['meta'] ?? []),
             unsited: isset($config['unsited_routes']) ? (bool) $config['unsited_routes'] : null,
+            config: (array) ($config['config'] ?? []),
+            views: array_values(array_map('strval', (array) ($config['views'] ?? []))),
+            stateful: (bool) ($config['stateful'] ?? false),
         );
     }
 
@@ -145,7 +153,7 @@ final readonly class Site
         }
 
         return new self($this->name, $this->hosts, $this->dynamic, $this->canonical, $this->scheme, $this->port, $this->routes,
-            [$middleware, ...$this->middleware], $this->where, $this->session, $this->redirects, $this->robots, $this->assetUrl, $this->meta, $this->unsited);
+            [$middleware, ...$this->middleware], $this->where, $this->session, $this->redirects, $this->robots, $this->assetUrl, $this->meta, $this->unsited, $this->config, $this->views, $this->stateful);
     }
 
     /** Is the given host (already normalised) one of this site's exact hosts? */

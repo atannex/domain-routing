@@ -16,7 +16,7 @@ abstract class TenancyTestCase extends ComboTestCase
     protected array $requires = [Tenancy::class];
 
     protected array $sites = [
-        'central' => ['hosts' => ['central.test'], 'middleware' => ['web']],
+        'central' => ['hosts' => ['tenancy:central'], 'middleware' => ['web']],
         'tenant' => ['hosts' => ['dynamic'], 'middleware' => ['web']],
     ];
 
@@ -31,6 +31,9 @@ abstract class TenancyTestCase extends ComboTestCase
 
         $app['config']->set('tenancy.identification.central_domains', ['central.test']);
         $app['config']->set('domain-routing.handoff.enabled', true);
+        $app['config']->set('domain-routing.integrations.tenancy.central_site', 'central');
+        $app['config']->set('tenancy.people.routes.enabled', true);
+        $app['config']->set('tenancy.domains.tls_ask.enabled', true);
         $app['config']->set('tenancy.database.sqlite_path', sys_get_temp_dir().'/dr-tenancy-'.getmypid());
     }
 }

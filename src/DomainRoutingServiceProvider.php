@@ -12,11 +12,14 @@ use Atannex\DomainRouting\Hosts\HostPattern;
 use Atannex\DomainRouting\Hosts\IndexCache;
 use Atannex\DomainRouting\Http\Controllers\HandoffController;
 use Atannex\DomainRouting\Http\Controllers\RobotsController;
+use Atannex\DomainRouting\Http\Controllers\TlsAskController;
 use Atannex\DomainRouting\Http\Middleware\ApplySiteMiddleware;
 use Atannex\DomainRouting\Http\Middleware\Canonicalize;
 use Atannex\DomainRouting\Http\Middleware\EnsureSessionStamp;
 use Atannex\DomainRouting\Http\Middleware\ResolveSite;
 use Atannex\DomainRouting\Http\Middleware\SiteMaintenance;
+use Atannex\DomainRouting\Http\Middleware\SiteThrottleRequests;
+use Atannex\DomainRouting\Http\Middleware\SiteThrottleRequestsWithRedis;
 use Atannex\DomainRouting\Integrations\Tenancy\TenancyIntegration;
 use Atannex\DomainRouting\Queue\QueueContext;
 use Atannex\DomainRouting\Resolution\SiteContext;
@@ -38,6 +41,9 @@ use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Routing\CompiledRouteCollection;
 use Illuminate\Routing\Events\RouteMatched;
+use Illuminate\Routing\Middleware\ThrottleRequests;
+use Illuminate\Routing\Middleware\ThrottleRequestsWithRedis;
+use Illuminate\Routing\Redirector;
 use Illuminate\Routing\RouteCollection;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Event;
@@ -55,10 +61,16 @@ final class DomainRoutingServiceProvider extends ServiceProvider
         $this->app->singleton(Extensions::class);
 
         $this->app->singleton(SiteRegistry::class, function ($app): SiteRegistry {
-            HostPattern::$reserved = array_values(array_map('strtolower', (array) $app['config']->get('domain-routing.reserved_labels', [])));
+            $reserved = (array) $app['config']->get('domain-routing.reserved_labels', []);
+
+            if (TenancyIntegration::available()) {
+                $reserved = [...$reserved, ...TenancyIntegration::reservedLabels()];
+            }
+
+            HostPattern::$reserved = array_values(array_unique(array_map('strtolower', $reserved)));
 
             $registry = SiteRegistry::fromConfig(
-                (array) $app['config']->get('domain-routing.sites', []),
+                self::expandHostTokens((array) $app['config']->get('domain-routing.sites', [])),
                 (string) $app->environment(),
                 Site::parseOverrides($app['config']->get('domain-routing.host_overrides')),
             );
@@ -89,7 +101,20 @@ final class DomainRoutingServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $config = $this->app['config'];
-        SiteValidator::$shared = array_values(array_map('strval', (array) $config->get('domain-routing.shared_routes', [])));
+        $shared = (array) $config->get('domain-routing.shared_routes', []);
+        $except = (array) $config->get('domain-routing.except', []);
+
+        if ($config->get('domain-routing.tls_ask.enabled')) {
+            $except[] = trim((string) $config->get('domain-routing.tls_ask.path'), '/');
+        }
+
+        if (TenancyIntegration::available()) {
+            $shared = [...$shared, ...TenancyIntegration::sharedRoutes()];
+            $except = [...$except, ...TenancyIntegration::exceptPaths()];
+        }
+
+        SiteValidator::$shared = array_values(array_unique(array_map('strval', $shared)));
+        $config->set('domain-routing.except', array_values(array_unique(array_map('strval', $except))));
 
         $extensions = $this->app->make(Extensions::class);
 
@@ -107,6 +132,8 @@ final class DomainRoutingServiceProvider extends ServiceProvider
 
         $this->registerMiddleware();
         $this->registerRoutes();
+        $this->registerRedirects();
+        $this->isolateRateLimits();
         $this->registerQueueContext();
 
         Event::listen(RouteMatched::class, function (RouteMatched $event): void {
@@ -138,6 +165,7 @@ final class DomainRoutingServiceProvider extends ServiceProvider
             $this->commands([
                 Console\ListCommand::class,
                 Console\ResolveCommand::class,
+                Console\RoutesCommand::class,
                 Console\CacheCommand::class,
                 Console\ClearCommand::class,
                 Console\DoctorCommand::class,
@@ -216,9 +244,73 @@ final class DomainRoutingServiceProvider extends ServiceProvider
             });
         }
 
+        if ($config->get('domain-routing.tls_ask.enabled')) {
+            $router->get(trim((string) $config->get('domain-routing.tls_ask.path'), '/'), TlsAskController::class)
+                ->middleware((array) $config->get('domain-routing.tls_ask.middleware', []))
+                ->name('domain-routing.tls.ask');
+        }
+
         if ($config->get('domain-routing.robots.enabled')) {
             $router->group(['site' => SiteValidator::ANY], fn () => $router->get('robots.txt', RobotsController::class)->name('domain-routing.robots'));
         }
+    }
+
+    /** redirect()->toSite('app', '/path', ['account' => 'acme']) and redirect()->siteRoute('app', 'dashboard'). */
+    private function registerRedirects(): void
+    {
+        Redirector::macro('toSite', fn (string $site, string $path = '/', array $parameters = [], int $status = 302) => $this->to(site_url($site, $path, $parameters), $status));
+        Redirector::macro('siteRoute', fn (string $site, string $name, array $parameters = [], int $status = 302) => $this->to(site_route($site, $name, $parameters), $status));
+    }
+
+    /** Point the stock "throttle" alias at the site-aware subclass (custom throttle middleware is left alone). */
+    private function isolateRateLimits(): void
+    {
+        if (! $this->app['config']->get('domain-routing.isolate_rate_limits', true)) {
+            return;
+        }
+
+        $router = $this->app['router'];
+        $current = $router->getMiddleware()['throttle'] ?? ThrottleRequests::class;
+
+        $replacement = match ($current) {
+            ThrottleRequests::class => SiteThrottleRequests::class,
+            ThrottleRequestsWithRedis::class => SiteThrottleRequestsWithRedis::class,
+            default => null,
+        };
+
+        if ($replacement !== null) {
+            $router->aliasMiddleware('throttle', $replacement);
+        }
+    }
+
+    /**
+     * "tenancy:central" in a site's hosts stands for tenancy's central domains.
+     *
+     * @param  array<string, array<string, mixed>>  $sites
+     * @return array<string, array<string, mixed>>
+     */
+    private static function expandHostTokens(array $sites): array
+    {
+        $expand = function (array $hosts): array {
+            $out = [];
+
+            foreach ($hosts as $host) {
+                if ($host === 'tenancy:central') {
+                    array_push($out, ...(TenancyIntegration::available() ? TenancyIntegration::centralHosts() : []));
+                } else {
+                    $out[] = $host;
+                }
+            }
+
+            return $out;
+        };
+
+        foreach ($sites as $name => $site) {
+            $hosts = (array) ($site['hosts'] ?? []);
+            $sites[$name]['hosts'] = array_is_list($hosts) ? $expand($hosts) : array_map(fn ($list) => $expand((array) $list), $hosts);
+        }
+
+        return $sites;
     }
 
     private function registerQueueContext(): void

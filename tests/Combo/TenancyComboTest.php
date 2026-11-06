@@ -47,13 +47,13 @@ it('answers 404 for unknown and unverified domains', function () {
     $this->get('http://unverified.example/')->assertNotFound();
 });
 
-it('builds tenant URLs from anywhere', function () {
-    expect(route('tenant.orders', ['tenant' => 'acme']))->toBe('http://acme-shop.example/orders')
-        ->and(route('tenant.orders', ['tenant' => $this->acme, 'page' => 2]))->toBe('http://acme-shop.example/orders?page=2')
-        ->and(site_url('tenant', '/x', ['tenant' => 'acme']))->toBe('http://acme-shop.example/x');
+it('builds tenant URLs from anywhere, with tenancy\'s scheme', function () {
+    expect(route('tenant.orders', ['tenant' => 'acme']))->toBe('https://acme-shop.example/orders')
+        ->and(route('tenant.orders', ['tenant' => $this->acme, 'page' => 2]))->toBe('https://acme-shop.example/orders?page=2')
+        ->and(site_url('tenant', '/x', ['tenant' => 'acme']))->toBe('https://acme-shop.example/x');
 
     $other = Tenant::factory()->create(['slug' => 'bare']);
-    expect(route('tenant.orders', ['tenant' => $other]))->toBe('http://bare.central.test/orders');
+    expect(route('tenant.orders', ['tenant' => $other]))->toBe('https://bare.central.test/orders');
 });
 
 it('links to the current tenant inside a tenant request', function () {
@@ -66,7 +66,7 @@ it('puts tenancy middleware in front on the tenant site only', function () {
     $sites = app(SiteRegistry::class);
 
     expect(SiteRoutes::middleware($sites->get('tenant')))->toBe(['tenant', 'web'])
-        ->and(SiteRoutes::middleware($sites->get('central')))->toBe(['web']);
+        ->and(SiteRoutes::middleware($sites->get('central')))->toBe(['central', 'web']);
 });
 
 it('keeps central routes off tenant domains, except shared paths and package endpoints', function () {

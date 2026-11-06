@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Atannex\DomainRouting\Urls;
 
+use Atannex\DomainRouting\Exceptions\MissingHostParameter;
 use Atannex\DomainRouting\Hosts\HostBuilder;
 use Atannex\DomainRouting\Hosts\HostNormalizer;
 use Atannex\DomainRouting\Routing\SiteValidator;
@@ -37,7 +38,17 @@ final class SiteRouteUrlGenerator extends RouteUrlGenerator
 
         $site = $sites->get($name);
         $builder = app(HostBuilder::class);
-        $resolved = $builder->resolve($site, $parameters);
+
+        try {
+            $resolved = $builder->resolve($site, $parameters);
+        } catch (MissingHostParameter $e) {
+            // A relative URL never needs the host (tenant_route() roots it itself).
+            if (! $this->absolute) {
+                return null;
+            }
+
+            throw $e;
+        }
 
         // Host values never leak into the query string, unless the path needs them too.
         foreach (array_diff($resolved->consumed, $route->parameterNames()) as $key) {

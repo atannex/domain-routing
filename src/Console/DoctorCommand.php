@@ -111,11 +111,23 @@ final class DoctorCommand extends Command
                 $this->warning("atannex/tenancy is installed but site [{$tenantSite}] is missing or not dynamic, so tenant domains are not served.");
             }
 
+            $subdomains = in_array('subdomain', (array) config('tenancy.identification.resolvers', []), true);
+
             foreach ((array) config('tenancy.identification.central_domains', []) as $central) {
-                $match = $resolver->resolve((string) $central);
+                $central = HostNormalizer::normalize((string) $central);
+                $match = $resolver->resolve($central);
 
                 if ($match !== null && $match->name() === $tenantSite) {
                     $this->failure("Tenancy central domain [{$central}] resolves to the tenant site.");
+                } elseif ($match === null && $central !== 'localhost') {
+                    $this->warning("Tenancy central domain [{$central}] is served by no site; add it (or \"tenancy:central\") to your central site's hosts.");
+                }
+
+                // A static {param}.central pattern would answer before tenancy's {slug}.central subdomains.
+                $probe = $sites->index()->match('domainroutingprobe.'.$central);
+
+                if ($subdomains && $probe !== null && $probe['site'] !== $tenantSite) {
+                    $this->failure("Site [{$probe['site']}] claims {slug}.{$central}, which tenancy serves as tenant subdomains; tenant subdomains would never reach the tenant site.");
                 }
             }
         }

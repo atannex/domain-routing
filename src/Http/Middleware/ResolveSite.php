@@ -22,6 +22,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\URL;
+use Illuminate\View\FileViewFinder;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -84,6 +85,12 @@ final class ResolveSite
 
         config($saved['config']);
         URL::forceRootUrl($saved['root']);
+
+        if ($saved['views'] !== null && app()->resolved('view') && ($finder = app('view')->getFinder()) instanceof FileViewFinder) {
+            $finder->setPaths($saved['views']);
+            // The finder caches resolved names; a site's view must not be served on the next site.
+            $finder->flush();
+        }
         Context::forget(['site', 'site_host', 'site_source']);
 
         if (app()->resolved('cookie')) {
@@ -124,9 +131,12 @@ final class ResolveSite
     {
         $url = app('url');
 
+        $keys = [...array_map(fn ($key) => 'session.'.$key, self::SESSION_KEYS), 'sanctum.stateful', ...array_keys($match->site->config)];
+
         $request->attributes->set(self::RESTORE, [
-            'config' => $this->sessionConfig(),
+            'config' => array_combine($keys, array_map(fn ($key) => config($key), $keys)),
             'root' => $url instanceof SiteUrlGenerator ? $url->forcedRoot() : null,
+            'views' => $match->site->views !== [] && app()->bound('view') && app('view')->getFinder() instanceof FileViewFinder ? app('view')->getFinder()->getPaths() : null,
         ]);
 
         $this->context->set($match);
@@ -141,6 +151,7 @@ final class ResolveSite
         }
 
         $this->applySession($match->site);
+        $this->applySite($match);
 
         $this->events->dispatch(new SiteResolved($match));
     }
@@ -174,6 +185,28 @@ final class ResolveSite
         }
     }
 
+    /** Per-site config, view paths and Sanctum stateful host, for this request only. */
+    private function applySite(SiteMatch $match): void
+    {
+        foreach ($match->site->config as $key => $value) {
+            config([$key => $value]);
+        }
+
+        if ($match->site->views !== [] && app()->bound('view') && ($finder = app('view')->getFinder()) instanceof FileViewFinder) {
+
+            foreach (array_reverse($match->site->views) as $path) {
+                $finder->prependLocation($path);
+            }
+
+            $finder->flush();
+        }
+
+        // SPA sign-in on this host (tenant custom domains included) without listing every host in SANCTUM_STATEFUL_DOMAINS.
+        if ($match->site->stateful && is_array(config('sanctum.stateful'))) {
+            config(['sanctum.stateful' => array_values(array_unique([...config('sanctum.stateful'), $match->host]))]);
+        }
+    }
+
     /** Do routes outside any site answer here? Site setting first, then unsited_routes. */
     private function unsitedAllowed(SiteMatch $match): bool
     {
@@ -187,17 +220,5 @@ final class ResolveSite
             SiteValidator::STATIC => $match->source !== SiteMatch::PROVIDER,
             default => in_array($match->source, [SiteMatch::EXACT, SiteMatch::DEFAULT], true),
         };
-    }
-
-    /** @return array<string, mixed> */
-    private function sessionConfig(): array
-    {
-        $values = [];
-
-        foreach (self::SESSION_KEYS as $key) {
-            $values['session.'.$key] = config('session.'.$key);
-        }
-
-        return $values;
     }
 }

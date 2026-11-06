@@ -8,6 +8,7 @@ return [
      * environment => list with '*' as the fallback. A host is exact
      * ("atannex.com"), parameterised ("{account}.atannex.com") or the word
      * "dynamic" (asked of HostProviders, e.g. verified tenant domains).
+     * With atannex/tenancy, "tenancy:central" stands for its central domains.
      * Override hosts per deployment with DOMAIN_ROUTING_HOSTS="app=a.com,b.com;marketing=x.com"
      * (read here, so it survives config:cache).
      *
@@ -25,6 +26,9 @@ return [
      *     'asset_url' => null,
      *     'meta' => [],             // free-form (locale, brand…)
      *     'unsited_routes' => null, // true/false: do routes outside any site answer here?
+     *     'config' => [],           // config values for this site's requests, e.g. ['app.name' => 'Shop']
+     *     'views' => [],            // view paths searched first on this site
+     *     'stateful' => false,      // add this host to sanctum.stateful for its requests (SPA sign-in)
      * ],
      */
     'sites' => [],
@@ -52,6 +56,18 @@ return [
         'status' => 301,
         'non_get' => 421,      // 421 Misdirected Request | 308
         'redirects' => [],     // applied on every site after the site's own map
+        // e.g. 'max-age=31536000; includeSubDomains' — sent on secure responses of https sites.
+        'hsts' => null,
+    ],
+
+    // Per-site rate-limit buckets: re-points the "throttle" alias at a site-aware subclass.
+    'isolate_rate_limits' => true,
+
+    // On-demand TLS ask endpoint: GET {path}?domain=host → 200 when a site serves the host.
+    'tls_ask' => [
+        'enabled' => false,
+        'path' => 'domain-routing/tls/ask',
+        'middleware' => ['throttle:120,1'],
     ],
 
     /*
@@ -110,7 +126,13 @@ return [
     'parameters' => [],
 
     'integrations' => [
-        'tenancy' => ['enabled' => true, 'site' => 'tenant', 'middleware' => 'tenant'],
+        'tenancy' => [
+            'enabled' => true,
+            'site' => 'tenant',            // the dynamic site tenant domains are served on
+            'middleware' => 'tenant',      // put in front of that site's middleware
+            'central_site' => null,        // e.g. 'central': gets tenancy's guard below
+            'central_middleware' => 'central',
+        ],
         'routing' => ['enabled' => true],
     ],
 

@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Atannex\DomainRouting\Hosts;
 
 use Atannex\DomainRouting\Exceptions\MissingHostParameter;
+use Atannex\DomainRouting\Integrations\Tenancy\TenancyIntegration;
 use Atannex\DomainRouting\Resolution\SiteContext;
+use Atannex\DomainRouting\Routing\SiteValidator;
 use Atannex\DomainRouting\Sites\Site;
 use Illuminate\Contracts\Foundation\Application;
 
@@ -26,11 +28,18 @@ final class HostBuilder
             return $scheme;
         }
 
+        $inRequest = $this->app->bound('request') && $this->app['request']->attributes->has(SiteValidator::ATTRIBUTE);
+
+        // Outside a request, the tenant site follows tenancy's scheme rule, so both packages build the same links.
+        if (! $inRequest && ($tenancy = TenancyIntegration::scheme($site->name)) !== null) {
+            return $tenancy;
+        }
+
         if ($this->app->environment('production')) {
             return 'https';
         }
 
-        return $this->app->bound('request') && ! $this->app->runningInConsole() ? $this->app['request']->getScheme() : 'http';
+        return $inRequest || ($this->app->bound('request') && ! $this->app->runningInConsole()) ? $this->app['request']->getScheme() : 'http';
     }
 
     /** @param array<array-key, mixed> $parameters */
