@@ -7,20 +7,14 @@ use Atannex\DomainRouting\Exceptions\InvalidHandoffTarget;
 use Atannex\DomainRouting\Handoff\Handoffs;
 use Atannex\DomainRouting\Handoff\RejectionReason;
 use Atannex\DomainRouting\Handoff\SessionStamps;
+use Atannex\DomainRouting\Tests\Fixtures\Schema;
 use Atannex\DomainRouting\Tests\Fixtures\User;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
-use Illuminate\Support\Facades\Schema;
 
-function usersTable(): void
+function usersTable(string $connection = 'testing'): void
 {
-    Schema::create('users', function ($table) {
-        $table->id();
-        $table->string('name');
-        $table->string('password')->nullable();
-        $table->rememberToken();
-        $table->timestamps();
-    });
+    Schema::users($connection);
 }
 
 beforeEach(function () {

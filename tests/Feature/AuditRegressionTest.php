@@ -9,21 +9,15 @@ use Atannex\DomainRouting\Handoff\RejectionReason;
 use Atannex\DomainRouting\Handoff\SessionStamps;
 use Atannex\DomainRouting\Hosts\HostPattern;
 use Atannex\DomainRouting\Tests\Fixtures\Controllers\EchoController;
+use Atannex\DomainRouting\Tests\Fixtures\Schema;
 use Atannex\DomainRouting\Tests\Fixtures\User;
 use Illuminate\Http\Middleware\TrustProxies;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
-use Illuminate\Support\Facades\Schema;
 
 function auditUsers(string $connection = 'testing'): void
 {
-    Schema::connection($connection)->create('users', function ($table) {
-        $table->id();
-        $table->string('name');
-        $table->string('password')->nullable();
-        $table->rememberToken();
-        $table->timestamps();
-    });
+    Schema::users($connection);
 }
 
 it('refuses a forged issue link: only an exchange this session started can be issued', function () {

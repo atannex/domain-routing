@@ -30,6 +30,76 @@ jobs:
       - run: composer update --${{ matrix.stability }} --prefer-dist --no-interaction
       - run: vendor/bin/pest
 
+  databases:
+    name: ${{ matrix.db }} + Redis
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - db: mysql
+            image: mysql:8.4
+            port: 3306
+          - db: mariadb
+            image: mariadb:11.4
+            port: 3306
+          - db: pgsql
+            image: postgres:17
+            port: 5432
+    services:
+      database:
+        image: ${{ matrix.image }}
+        env:
+          MYSQL_ROOT_PASSWORD: secret
+          MYSQL_DATABASE: domain_routing_test
+          MARIADB_ROOT_PASSWORD: secret
+          MARIADB_DATABASE: domain_routing_test
+          POSTGRES_PASSWORD: secret
+          POSTGRES_DB: domain_routing_test
+        ports: ['${{ matrix.port }}:${{ matrix.port }}']
+        options: >-
+          --health-cmd="${{ matrix.db == 'pgsql' && 'pg_isready -U postgres' || (matrix.db == 'mariadb' && 'healthcheck.sh --connect --innodb_initialized' || 'mysqladmin ping -h 127.0.0.1 -psecret') }}"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+        options: --health-cmd="redis-cli ping" --health-interval=5s --health-timeout=3s --health-retries=10
+    env:
+      DOMAIN_ROUTING_TEST_DB: ${{ matrix.db }}
+      DOMAIN_ROUTING_TEST_DB_PORT: ${{ matrix.port }}
+      DOMAIN_ROUTING_TEST_DB_USERNAME: ${{ matrix.db == 'pgsql' && 'postgres' || 'root' }}
+      DOMAIN_ROUTING_TEST_DB_PASSWORD: secret
+      DOMAIN_ROUTING_TEST_CACHE: redis
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php: '8.4'
+          extensions: intl, pdo_mysql, pdo_pgsql, redis
+          coverage: none
+      - run: composer install --prefer-dist --no-interaction
+      - run: vendor/bin/pest
+
+  redis:
+    name: Redis cache (SQLite database)
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+        options: --health-cmd="redis-cli ping" --health-interval=5s --health-timeout=3s --health-retries=10
+    env:
+      DOMAIN_ROUTING_TEST_CACHE: redis
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php: '8.4'
+          extensions: intl, pdo_sqlite, redis
+          coverage: none
+      - run: composer install --prefer-dist --no-interaction
+      - run: vendor/bin/pest
+
   standalone:
     name: Without atannex/tenancy and atannex/routing
     runs-on: ubuntu-latest

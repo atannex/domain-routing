@@ -7,23 +7,17 @@ use Atannex\DomainRouting\Handoff\Handoffs;
 use Atannex\DomainRouting\Handoff\SessionStamps;
 use Atannex\DomainRouting\Support\CentralCache;
 use Atannex\DomainRouting\Tests\Combo\TenancyTestCase;
+use Atannex\DomainRouting\Tests\Fixtures\Schema;
 use Atannex\DomainRouting\Tests\Fixtures\User;
 use Atannex\Tenancy\Models\Tenant;
 use Atannex\Tenancy\Tenancy;
 use Illuminate\Support\Facades\Route;
-use Illuminate\Support\Facades\Schema;
 
 uses(TenancyTestCase::class);
 
 beforeEach(function () {
     config(['domain-routing.stamps.enabled' => true]);
-    Schema::create('users', function ($table) {
-        $table->id();
-        $table->string('name');
-        $table->string('password')->nullable();
-        $table->rememberToken();
-        $table->timestamps();
-    });
+    Schema::users();
     $this->user = User::create(['name' => 'Ada']);
     $this->acme = Tenant::factory()->withDomain('acme-shop.example')->create(['slug' => 'acme']);
 

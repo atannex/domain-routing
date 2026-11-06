@@ -67,7 +67,7 @@ final class Handoffs
 
         // Only an exchange this session started can be issued: a forged link to /issue finds no nonce.
         $nonce = $this->random();
-        $request->session()->put(self::NONCE.'.'.hash('sha256', $nonce), ['to' => $this->siteKey($origin), 'expires' => time() + (int) config('domain-routing.handoff.state_ttl', 300)]);
+        $request->session()->put(self::NONCE.'.'.hash('sha256', $nonce), ['to' => $this->siteKey($origin), 'expires' => now()->getTimestamp() + (int) config('domain-routing.handoff.state_ttl', 300)]);
 
         $query = http_build_query(array_filter(['from' => $from, 'r' => $path, 'g' => $guard, 'n' => $nonce]));
 
@@ -135,7 +135,7 @@ final class Handoffs
         $nonce = $request->query('n');
         $pending = is_string($nonce) && $request->hasSession() ? $request->session()->pull(self::NONCE.'.'.hash('sha256', $nonce)) : null;
 
-        if (! is_array($pending) || ! hash_equals((string) ($pending['to'] ?? ''), $this->siteKey($origin)) || ($pending['expires'] ?? 0) < time()) {
+        if (! is_array($pending) || ! hash_equals((string) ($pending['to'] ?? ''), $this->siteKey($origin)) || ($pending['expires'] ?? 0) < now()->getTimestamp()) {
             return $this->reject(RejectionReason::NotStarted, $request);
         }
 
@@ -153,6 +153,8 @@ final class Handoffs
             'site' => $this->context->current()?->name(),
             'ip' => config('domain-routing.handoff.bind_ip') ? $request->ip() : null,
             'agent' => config('domain-routing.handoff.bind_user_agent') ? hash('sha256', (string) $request->userAgent()) : null,
+            // Checked on redeem too: never rely only on the store's TTL.
+            'expires' => now()->getTimestamp() + (int) config('domain-routing.handoff.ttl', 60),
         ], (int) config('domain-routing.handoff.ttl', 60));
 
         $this->events->dispatch(new HandoffIssued((string) $guardName, $user, $host, $this->context->current()?->name()));
@@ -191,7 +193,7 @@ final class Handoffs
             return $this->reject(RejectionReason::StoreUnavailable, $request);
         }
 
-        if (! is_array($payload)) {
+        if (! is_array($payload) || (int) ($payload['expires'] ?? 0) < now()->getTimestamp()) {
             return $this->reject(RejectionReason::ExpiredOrUsed, $request);
         }
 
