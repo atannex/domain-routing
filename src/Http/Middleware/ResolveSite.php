@@ -14,6 +14,7 @@ use Atannex\DomainRouting\Resolution\SiteMatch;
 use Atannex\DomainRouting\Resolution\SiteResolver;
 use Atannex\DomainRouting\Routing\SiteValidator;
 use Atannex\DomainRouting\Sites\SiteRegistry;
+use Atannex\DomainRouting\Urls\SiteUrlGenerator;
 use Closure;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Http\RedirectResponse;
@@ -60,7 +61,8 @@ final class ResolveSite
 
         // Everything changed for this request is put back afterwards (Octane, workers, tests).
         $config = $this->sessionConfig();
-        $root = URL::domainRoutingForcedRoot();
+        $url = app('url');
+        $root = $url instanceof SiteUrlGenerator ? $url->forcedRoot() : null;
 
         try {
             $this->enter($request, $match);

@@ -35,7 +35,6 @@ use Illuminate\Routing\CompiledRouteCollection;
 use Illuminate\Routing\Events\RouteMatched;
 use Illuminate\Routing\RouteCollection;
 use Illuminate\Routing\Router;
-use Illuminate\Routing\UrlGenerator;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\ServiceProvider;
@@ -64,12 +63,6 @@ final class DomainRoutingServiceProvider extends ServiceProvider
         $this->app->singleton(DomainRouting::class);
 
         $this->registerUrlGenerator();
-
-        // Lets ResolveSite put back whatever root the app forced before it.
-        UrlGenerator::macro('domainRoutingForcedRoot', function (): ?string {
-            /** @var UrlGenerator $this */
-            return $this->forcedRoot;
-        });
 
         $router = $this->app['router'];
         $routes = $router->getRoutes();
