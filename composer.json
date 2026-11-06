@@ -1,0 +1,48 @@
+{
+    "name": "atannex/domain-routing",
+    "description": "Multi-domain routing for Laravel: sites bound to hosts, site-scoped routes, cross-domain URLs, canonical hosts, per-site maintenance and cross-domain sign-in. Works alone or with atannex/tenancy.",
+    "keywords": ["laravel", "routing", "domains", "multi-domain", "subdomains", "tenancy", "sso"],
+    "type": "library",
+    "license": "MIT",
+    "homepage": "https://github.com/atannex/domain-routing",
+    "authors": [{"name": "Atangageih Leke Collins", "email": "atangageihlekecollins@gmail.com"}],
+    "support": {"issues": "https://github.com/atannex/domain-routing/issues", "source": "https://github.com/atannex/domain-routing"},
+    "require": {
+        "php": "^8.3",
+        "laravel/framework": "^12.0|^13.0"
+    },
+    "require-dev": {
+        "atannex/routing": "^1.1",
+        "atannex/tenancy": "^1.0",
+        "larastan/larastan": "^3.0",
+        "laravel/pint": "^1.18",
+        "orchestra/testbench": "^10.0|^11.0",
+        "pestphp/pest": "^3.7|^4.0"
+    },
+    "suggest": {
+        "atannex/tenancy": "Serve verified tenant domains as a dynamic site (built-in adapter).",
+        "atannex/routing": "Put controllers on a site with the #[Site] attribute.",
+        "ext-intl": "Internationalised host names (IDN to punycode)."
+    },
+    "autoload": {
+        "psr-4": {"Atannex\\DomainRouting\\": "src/"},
+        "files": ["src/helpers.php"]
+    },
+    "autoload-dev": {
+        "psr-4": {"Atannex\\DomainRouting\\Tests\\": "tests/"}
+    },
+    "extra": {
+        "laravel": {
+            "providers": ["Atannex\\DomainRouting\\DomainRoutingServiceProvider"],
+            "aliases": {"DomainRouting": "Atannex\\DomainRouting\\Facades\\DomainRouting"}
+        },
+        "branch-alias": {"dev-main": "1.x-dev"}
+    },
+    "scripts": {
+        "test": "pest",
+        "analyse": "phpstan analyse --memory-limit=1G"
+    },
+    "config": {"sort-packages": true, "allow-plugins": {"pestphp/pest-plugin": true}},
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
