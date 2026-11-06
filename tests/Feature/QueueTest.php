@@ -2,10 +2,14 @@
 
 declare(strict_types=1);
 
+use Atannex\DomainRouting\Facades\DomainRouting;
+use Atannex\DomainRouting\Queue\QueueContext;
 use Atannex\DomainRouting\Tests\Fixtures\Controllers\EchoController;
+use Illuminate\Contracts\Queue\Job;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Route;
 
 final class RecordSiteJob implements ShouldQueue
@@ -40,18 +44,18 @@ it('restores the site in a worker from the payload', function () {
     Route::site('app', fn () => Route::get('/dashboard', EchoController::class)->name('dashboard'));
 
     $payload = null;
-    \Illuminate\Support\Facades\Queue::createPayloadUsing(null);
+    Queue::createPayloadUsing(null);
     // Build the payload as the provider would, inside a site.
-    \Atannex\DomainRouting\Facades\DomainRouting::run('app', function () use (&$payload) {
-        $payload = app(\Atannex\DomainRouting\Queue\QueueContext::class)->payload();
+    DomainRouting::run('app', function () use (&$payload) {
+        $payload = app(QueueContext::class)->payload();
     }, ['account' => 'acme']);
 
     expect($payload['domainRouting'])->toMatchArray(['site' => 'app', 'host' => 'acme.app.test', 'parameters' => ['account' => 'acme']]);
 
-    $job = Mockery::mock(\Illuminate\Contracts\Queue\Job::class);
+    $job = Mockery::mock(Job::class);
     $job->shouldReceive('payload')->andReturn($payload);
 
-    $context = app(\Atannex\DomainRouting\Queue\QueueContext::class);
+    $context = app(QueueContext::class);
     $context->enter($job);
     expect(route('app.dashboard'))->toBe('http://acme.app.test/dashboard');
     $context->leave();

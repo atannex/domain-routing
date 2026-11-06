@@ -39,8 +39,8 @@ final class SiteRoutes
     public static function load(Router $router, SiteRegistry $sites): void
     {
         foreach ($sites->all() as $site) {
-            if ($site->routes !== []) {
-                $router->site($site->name, $site->routes);
+            foreach ($site->routes as $file) {
+                $router->group(self::attributes($site), $file);
             }
         }
     }

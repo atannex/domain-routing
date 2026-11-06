@@ -12,6 +12,7 @@ use Atannex\DomainRouting\Resolution\SiteResolver;
 use Atannex\DomainRouting\Routing\SiteValidator;
 use Atannex\DomainRouting\Sites\SiteRegistry;
 use Atannex\DomainRouting\Urls\SiteUrlGenerator;
+use Illuminate\Cache\ArrayStore;
 use Illuminate\Console\Command;
 use Illuminate\Contracts\Cache\LockProvider;
 use Throwable;
@@ -98,7 +99,7 @@ final class DoctorCommand extends Command
 
                 if (! $store instanceof LockProvider) {
                     $this->failure('The handoff cache store has no atomic locks; tokens could be redeemed twice.');
-                } elseif (app()->environment('production') && $store instanceof \Illuminate\Cache\ArrayStore) {
+                } elseif (app()->environment('production') && $store instanceof ArrayStore) {
                     $this->failure('The handoff cache store is the array store; tokens would not survive between requests.');
                 }
             } catch (Throwable $e) {

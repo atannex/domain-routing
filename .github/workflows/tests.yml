@@ -1,0 +1,59 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    name: PHP ${{ matrix.php }} · Laravel ${{ matrix.laravel }} · ${{ matrix.stability }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.3', '8.4', '8.5']
+        laravel: ['12.*', '13.*']
+        stability: [prefer-stable]
+        include:
+          - php: '8.3'
+            laravel: '12.*'
+            stability: prefer-lowest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php: ${{ matrix.php }}
+          extensions: intl, pdo_sqlite
+          coverage: none
+      - run: composer require "laravel/framework:${{ matrix.laravel }}" --no-update --no-interaction
+      - run: composer update --${{ matrix.stability }} --prefer-dist --no-interaction
+      - run: vendor/bin/pest
+
+  standalone:
+    name: Without atannex/tenancy and atannex/routing
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php: '8.4'
+          extensions: intl, pdo_sqlite
+          coverage: none
+      - run: composer remove --dev atannex/tenancy atannex/routing --no-interaction
+      - run: vendor/bin/pest
+
+  quality:
+    name: PHPStan, Pint and audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php: '8.4'
+          extensions: intl
+          coverage: none
+      - run: composer install --prefer-dist --no-interaction
+      - run: vendor/bin/phpstan analyse --memory-limit=1G --no-progress
+      - run: vendor/bin/pint --test
+      - run: composer audit

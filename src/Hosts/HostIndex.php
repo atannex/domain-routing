@@ -99,7 +99,7 @@ final class HostIndex
             $regexes[] = substr(HostPattern::parse($pattern, $where)->regex(), 1, -1);
         }
 
-        return array_values($regexes);
+        return $regexes;
     }
 
     /** @return array{exact: array<string, string>, patterns: list<array{0: string, 1: string, 2: array<string, string>}>, conflicts: list<string>} */

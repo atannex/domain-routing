@@ -2,6 +2,7 @@ includes:
     - vendor/larastan/larastan/extension.neon
 parameters:
     level: 6
-    paths: [src, config]
+    paths: [src]
     ignoreErrors:
         - identifier: missingType.iterableValue
+        - identifier: trait.unused

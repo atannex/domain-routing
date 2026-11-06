@@ -7,6 +7,7 @@ namespace Atannex\DomainRouting\Urls;
 use Atannex\DomainRouting\Hosts\HostBuilder;
 use Atannex\DomainRouting\Hosts\HostNormalizer;
 use Atannex\DomainRouting\Routing\SiteValidator;
+use Atannex\DomainRouting\Sites\Site;
 use Atannex\DomainRouting\Sites\SiteRegistry;
 use Illuminate\Routing\RouteUrlGenerator;
 
@@ -57,7 +58,7 @@ final class SiteRouteUrlGenerator extends RouteUrlGenerator
         return $builder->rootFor($site, $resolved->host);
     }
 
-    private function portMatches(\Atannex\DomainRouting\Sites\Site $site): bool
+    private function portMatches(Site $site): bool
     {
         return $site->port === null || (int) $this->request->getPort() === $site->port;
     }

@@ -27,12 +27,13 @@ use Atannex\DomainRouting\Sites\SiteRegistry;
 use Atannex\DomainRouting\Urls\SiteUrlGenerator;
 use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Cookie\Middleware\EncryptCookies;
+use Illuminate\Foundation\Http\Kernel as HttpKernel;
 use Illuminate\Queue\Events\JobExceptionOccurred;
 use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Routing\CompiledRouteCollection;
-use Illuminate\Routing\RouteCollection;
 use Illuminate\Routing\Events\RouteMatched;
+use Illuminate\Routing\RouteCollection;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
@@ -155,12 +156,11 @@ final class DomainRoutingServiceProvider extends ServiceProvider
         $kernel = $this->app->make(Kernel::class);
 
         // Appended: after TrustProxies (so scheme and host are the client's), before routing and sessions.
-        foreach ([ResolveSite::class, Canonicalize::class, SiteMaintenance::class] as $middleware) {
-            if (method_exists($kernel, 'hasMiddleware') && $kernel->hasMiddleware($middleware)) {
-                continue;
+        // @phpstan-ignore instanceof.alwaysTrue (always true under Testbench; apps may bind their own kernel)
+        if ($kernel instanceof HttpKernel) {
+            foreach ([ResolveSite::class, Canonicalize::class, SiteMaintenance::class] as $middleware) {
+                $kernel->pushMiddleware($middleware);
             }
-
-            $kernel->pushMiddleware($middleware);
         }
 
         $router = $this->app['router'];
@@ -170,9 +170,7 @@ final class DomainRoutingServiceProvider extends ServiceProvider
             $router->pushMiddlewareToGroup('web', EnsureSessionStamp::class);
         }
 
-        if (method_exists(EncryptCookies::class, 'except')) {
-            EncryptCookies::except(array_map(fn ($site) => MaintenanceStore::cookie($site), array_keys($this->app->make(SiteRegistry::class)->all())));
-        }
+        EncryptCookies::except(array_map(fn ($site) => MaintenanceStore::cookie($site), array_keys($this->app->make(SiteRegistry::class)->all())));
     }
 
     private function registerRoutes(): void

@@ -5,7 +5,6 @@ declare(strict_types=1);
 use Atannex\DomainRouting\Exceptions\AmbiguousHostPatterns;
 use Atannex\DomainRouting\Hosts\HostIndex;
 use Atannex\DomainRouting\Hosts\IndexCache;
-use Atannex\DomainRouting\Sites\Site;
 use Atannex\DomainRouting\Sites\SiteRegistry;
 
 function sites(array $config): array
