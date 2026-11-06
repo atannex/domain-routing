@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace Atannex\DomainRouting;
 
 use Atannex\DomainRouting\Edge\MaintenanceStore;
+use Atannex\DomainRouting\Handoff\SessionStamps;
 use Atannex\DomainRouting\Hosts\Extensions;
 use Atannex\DomainRouting\Hosts\HostBuilder;
 use Atannex\DomainRouting\Hosts\HostPattern;
 use Atannex\DomainRouting\Hosts\IndexCache;
 use Atannex\DomainRouting\Http\Controllers\HandoffController;
 use Atannex\DomainRouting\Http\Controllers\RobotsController;
+use Atannex\DomainRouting\Http\Middleware\ApplySiteMiddleware;
 use Atannex\DomainRouting\Http\Middleware\Canonicalize;
 use Atannex\DomainRouting\Http\Middleware\EnsureSessionStamp;
 use Atannex\DomainRouting\Http\Middleware\ResolveSite;
@@ -27,6 +29,7 @@ use Atannex\DomainRouting\Routing\SiteValidator;
 use Atannex\DomainRouting\Sites\Site;
 use Atannex\DomainRouting\Sites\SiteRegistry;
 use Atannex\DomainRouting\Urls\SiteUrlGenerator;
+use Illuminate\Auth\Events\Login;
 use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Foundation\Http\Kernel as HttpKernel;
@@ -191,6 +194,8 @@ final class DomainRoutingServiceProvider extends ServiceProvider
 
         if ($this->app['config']->get('domain-routing.stamps.enabled')) {
             $router->pushMiddlewareToGroup('web', EnsureSessionStamp::class);
+
+            Event::listen(Login::class, fn (Login $event) => $this->app->make(SessionStamps::class)->stamp($event->guard, $event->user));
         }
     }
 
@@ -201,9 +206,14 @@ final class DomainRoutingServiceProvider extends ServiceProvider
 
         // The package's own endpoints answer on every site, dynamic ones included.
         if ($config->get('domain-routing.handoff.enabled')) {
-            $router->group(['site' => SiteValidator::ANY], fn () => $router->get(trim((string) $config->get('domain-routing.handoff.path', '_handoff'), '/'), HandoffController::class)
-                ->middleware((array) $config->get('domain-routing.handoff.middleware', ['web']))
-                ->name('domain-routing.handoff'));
+            $path = trim((string) $config->get('domain-routing.handoff.path', '_handoff'), '/');
+            $middleware = [ApplySiteMiddleware::class, ...(array) $config->get('domain-routing.handoff.middleware', [])];
+
+            $router->group(['site' => SiteValidator::ANY, 'middleware' => $middleware], function () use ($router, $path): void {
+                $router->get($path.'/start', [HandoffController::class, 'start'])->name('domain-routing.handoff.start');
+                $router->get($path.'/issue', [HandoffController::class, 'issue'])->name('domain-routing.handoff.issue');
+                $router->get($path, [HandoffController::class, 'redeem'])->name('domain-routing.handoff');
+            });
         }
 
         if ($config->get('domain-routing.robots.enabled')) {

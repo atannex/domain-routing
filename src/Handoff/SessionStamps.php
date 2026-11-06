@@ -5,10 +5,17 @@ declare(strict_types=1);
 namespace Atannex\DomainRouting\Handoff;
 
 use Atannex\DomainRouting\Events\SessionStampRevoked;
+use Atannex\DomainRouting\Support\CentralCache;
+use Illuminate\Auth\SessionGuard;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Cache\Repository;
+use Illuminate\Support\Str;
 
-/** A per-user stamp; bump it and every session holding the old one signs out, on every domain. */
+/**
+ * A per-user stamp, kept in a store that is the same on every domain. Bump it
+ * and every session holding the old one signs out, on every site and tenant;
+ * the remember-me token is cycled too, so "remember me" cookies stop working.
+ */
 final class SessionStamps
 {
     public function current(string $guard, string $userId): string
@@ -22,7 +29,22 @@ final class SessionStamps
         $id = (string) $user->getAuthIdentifier();
 
         $this->store()->forever($this->key($guard, $id), bin2hex(random_bytes(8)));
+
+        $instance = auth()->guard($guard);
+
+        if ($instance instanceof SessionGuard && $user->getRememberTokenName() !== '') {
+            $instance->getProvider()->updateRememberToken($user, Str::random(60));
+        }
+
         event(new SessionStampRevoked($guard, $id));
+    }
+
+    /** Write the current stamp into the session at login (Login event). */
+    public function stamp(string $guard, Authenticatable $user): void
+    {
+        if (app()->bound('session.store') && app('session.store')->isStarted()) {
+            app('session.store')->put(self::sessionKey($guard), $this->current($guard, (string) $user->getAuthIdentifier()));
+        }
     }
 
     public static function sessionKey(string $guard): string
@@ -37,6 +59,6 @@ final class SessionStamps
 
     private function store(): Repository
     {
-        return cache()->store(config('domain-routing.stamps.store'));
+        return CentralCache::store(config('domain-routing.stamps.store'));
     }
 }

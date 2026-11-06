@@ -47,11 +47,27 @@ Route::site('api', function () {
 });
 ```
 
-Routes outside any site match on every site. Set `strict_routes => true` to make them match only when no site resolved.
+Routes outside any site (`routes/web.php`) follow `unsited_routes`:
+
+| Mode | Where they answer |
+| --- | --- |
+| `exact` (default) | Sites matched by an exact host, and requests with no site. Never on `{account}.…` or dynamic (tenant) hosts, so central and admin routes can't leak onto a tenant's domain. |
+| `static` | Also on pattern hosts, never on dynamic hosts. |
+| `everywhere` / `none` | As named. |
+
+A site's own `'unsited_routes' => true|false` wins. `shared_routes` (URI patterns, default Livewire, broadcasting, Sanctum, storage and `up`) answer everywhere. A site's own route always beats an unsited route with the same URI, and a site's fallback beats a global one, whatever order they're registered in.
+
+`{account}` never matches a reserved label (`www`, `mail`, `ftp`… in `reserved_labels`), so `www.example.com` is never the account "www".
 
 `{account}` is added to the route parameters, so `public function show(string $account)` receives it. Turn this off with `bind_host_parameters => false`.
 
-Any host no site serves gets a 404 (`unmatched => abort`). The alternatives are `default` (serve the `default` site; links are pinned to its host) and `redirect:https://…`. Paths in `except` (default `['up']`) skip resolution, so health checks on raw IPs keep working.
+Any host no site serves gets a 404 (`unmatched => abort`). The alternatives are `default` and `redirect:https://…`. With `default`, unknown hosts are served by the `default` site and links are pinned to its host; only a site with a plain canonical host can be the default, otherwise unknown hosts still get a 404. Paths in `except` (default `['up']`) skip resolution, so health checks on raw IPs keep working.
+
+Override hosts per deployment with `DOMAIN_ROUTING_HOSTS="app=a.com,b.com;marketing=x.com"`. It's read in the config file, so it survives `config:cache`.
+
+### Sessions
+
+Session, remember-me and queued cookies stay on the exact host by default, even if `SESSION_DOMAIN` is shared (`isolate_sessions`). A site that sets `session.domain` shares its cookie on purpose, and gets its own cookie name (`laravel_session_{site}`) so sibling sites never load its session. Everything changed for a request is put back after the response.
 
 ## URLs
 
@@ -66,7 +82,7 @@ URL::signedRoute('app.invite', ['account' => 'acme']); // the signature covers t
 
 Inside a request on `acme.app.atannex.com`, `route('app.dashboard')` reuses `account`. A missing value throws `MissingHostParameter`, and a value that isn't one DNS label (or that breaks your `where` constraint) throws `InvalidHostParameter`.
 
-Jobs remember the site they were dispatched from. Use `DomainRouting::run('app', fn () => …, ['account' => 'acme'])` to work as a site from a command.
+Jobs remember the site they were dispatched from, and `url()`, `asset()` and unsited routes (password resets, email verification) in their mail point at that site. Use `DomainRouting::run('app', fn () => …, ['account' => 'acme'])` to work as a site from a command. In Blade: `@site('app') … @else … @endsite`.
 
 ## Canonical hosts
 
@@ -90,12 +106,27 @@ Visit `/let-me-in` on that site to get a bypass cookie. Set `robots.enabled => t
 ```php
 'handoff' => ['enabled' => true],
 
-return Handoffs::to(auth()->user(), 'https://acme-shop.com/orders'); // Atannex\DomainRouting\Handoff\Handoffs
+// On site A, for the signed-in user:
+return app(Handoffs::class)->to('https://acme-shop.com/orders'); // Atannex\DomainRouting\Handoff\Handoffs
 ```
 
-The token is single use, valid for 60 seconds, and bound to the user, the guard and the target host (optionally the IP). Only its SHA-256 is stored. Redemption takes an atomic lock and regenerates the session. Targets must be hosts a site serves, and landing paths must be relative. Use a cache store with locks (Redis, database, Memcached).
+It works in three hops, like OAuth's `state`:
 
-`stamps.enabled => true` adds a per-user session stamp; `SessionStamps::revokeAll($user)` signs that user out on every domain.
+1. A sends the browser to `B/_handoff/start`.
+2. B sets a state cookie on its own host and sends the browser back to `A/_handoff/issue`.
+3. A mints a token for the signed-in user, bound to B's host and the state's hash, and sends the browser to `B/_handoff?t=…`.
+
+B then signs the user in only if the browser holds the matching state cookie. A token captured or minted by someone else is useless, so there's no login CSRF.
+
+- Tokens are 256-bit, single use (atomic pull under a lock) and valid for 60 seconds. Only their SHA-256 is stored, in a cache that tenancy never prefixes.
+- The token is bound to the target host and guard, and optionally to the IP or User-Agent.
+- Both sides must use the same users table (a fingerprint of the user provider's database), so an id never names someone else on a tenant database.
+- A different user already signed in on B is never replaced.
+- Guests are sent on as guests. Targets must be hosts a site serves, landing paths must be relative, and `http` targets become `https` in production.
+- The endpoints run the target site's own middleware (for example `tenant`, `web`).
+- Use a cache store with locks: Redis, database or Memcached.
+
+`stamps.enabled => true` adds a per-user session stamp, kept in an unprefixed store. `SessionStamps::revokeAll($user)` signs that user out on every domain and tenant, and cycles their remember-me token.
 
 ## With atannex/tenancy
 

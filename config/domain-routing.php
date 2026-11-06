@@ -80,10 +80,14 @@ return [
         'enabled' => false,
         'path' => '_handoff',
         'ttl' => 60,
+        'state_ttl' => 300,
+        'guard' => null,
         'bind_ip' => false,
-        'bind_user_agent' => true,
+        'bind_user_agent' => false,
+        // A cache store with atomic locks (redis, database, memcached). Never tenant-prefixed.
         'store' => null,
-        'middleware' => ['web', 'throttle:60,1'],
+        // Added after the site's own middleware (web, tenant…), which always runs first.
+        'middleware' => ['throttle:60,1'],
     ],
 
     // Per-user session stamp so "sign out everywhere" reaches every domain.

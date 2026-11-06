@@ -9,21 +9,35 @@ use Atannex\DomainRouting\Handoff\RejectionReason;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
-/** @internal GET /_handoff?t=… */
+/** @internal GET /_handoff/start, /_handoff/issue, /_handoff */
 final class HandoffController
 {
-    public function __invoke(Request $request, Handoffs $handoffs): Response
+    // Laravel keeps controller instances on the route, so services are resolved per call.
+    public function start(Request $request, Handoffs $handoffs): Response
     {
-        $result = $handoffs->redeem($request);
+        return $this->respond($handoffs->start($request));
+    }
 
-        if ($result instanceof RejectionReason) {
-            return new Response('This sign-in link is invalid or has expired.', 403, [
-                'Cache-Control' => 'no-store, private',
-                'Referrer-Policy' => 'no-referrer',
-                'Content-Type' => 'text/plain; charset=UTF-8',
-            ]);
+    public function issue(Request $request, Handoffs $handoffs): Response
+    {
+        return $this->respond($handoffs->issue($request));
+    }
+
+    public function redeem(Request $request, Handoffs $handoffs): Response
+    {
+        return $this->respond($handoffs->redeem($request));
+    }
+
+    private function respond(Response|RejectionReason $result): Response
+    {
+        if ($result instanceof Response) {
+            return $result;
         }
 
-        return $result;
+        return new Response('This sign-in link is invalid or has expired.', 403, [
+            'Cache-Control' => 'no-store, private',
+            'Referrer-Policy' => 'no-referrer',
+            'Content-Type' => 'text/plain; charset=UTF-8',
+        ]);
     }
 }

@@ -50,3 +50,19 @@ it('reports ambiguous hosts and a bad default', function () {
         ->expectsOutputToContain('default names no site')
         ->assertFailed();
 });
+
+it('reports a shared session cookie that reaches another site', function () {
+    $this->withSites([
+        'm' => ['hosts' => ['atannex.test'], 'session' => ['domain' => '.atannex.test', 'cookie' => 'shared']],
+        'api' => ['hosts' => ['api.atannex.test'], 'session' => ['cookie' => 'shared']],
+    ]);
+
+    $this->artisan('domains:doctor')->expectsOutputToContain('also covers [api.atannex.test]')->assertFailed();
+});
+
+it('gives a site with a shared session domain its own cookie name', function () {
+    $this->withSites(['m' => ['hosts' => ['atannex.test'], 'session' => ['domain' => '.atannex.test']]]);
+    Route::get('/c', fn () => config('session.cookie'));
+
+    $this->get('http://atannex.test/c')->assertSee(config('session.cookie').'_m');
+});

@@ -12,4 +12,12 @@ All notable changes to this project are documented here. The format follows [Kee
 - Per-site maintenance (`domains:down`/`domains:up`) and robots.txt.
 - Cross-domain sign-in handoff and per-user session stamps.
 - atannex/tenancy adapter (`TenancyHostProvider`, `TenancyHostParameters`).
-- `domains:list`, `domains:resolve`, `domains:doctor`; testing helpers.
+- `domains:list`, `domains:resolve`, `domains:doctor`; testing helpers; `@site` Blade directive.
+
+### Security
+- Routes outside any site stay off pattern and dynamic hosts by default (`unsited_routes: exact`, `shared_routes`); a site's own routes and fallback always win.
+- Session, remember-me and queued cookies are host-only unless a site shares them; shared session domains get their own cookie name.
+- Handoff is a three-hop exchange bound to a state cookie on the target (no login CSRF), runs the target site's middleware, checks the user store matches, never replaces a signed-in user, and keeps tokens in an unprefixed store.
+- Session stamps live in an unprefixed store, are written at login, and revoking cycles remember-me tokens.
+- Reserved labels, a fixed host for the `default` site, mixed-case and trailing-dot hosts redirected, host constraints validated.
+- Per-request state (site, cookie scope, forced root, log context) is restored after terminate.

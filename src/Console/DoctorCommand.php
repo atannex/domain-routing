@@ -53,13 +53,40 @@ final class DoctorCommand extends Command
             }
         }
 
+        // A site sharing its session cookie with a parent domain must not hand it to sibling sites.
+        foreach ($sites->all() as $site) {
+            $domain = ltrim((string) ($site->session['domain'] ?? ''), '.');
+
+            if ($domain === '') {
+                continue;
+            }
+
+            $cookie = $site->session['cookie'] ?? null;
+
+            foreach ($sites->all() as $other) {
+                if ($other->name === $site->name || ($cookie !== null && ($other->session['cookie'] ?? config('session.cookie')) !== $cookie)) {
+                    continue;
+                }
+
+                foreach ($other->hosts as $host) {
+                    if ($host === $domain || str_ends_with($host, '.'.$domain)) {
+                        $this->failure("Site [{$site->name}] shares session cookie [".($cookie ?? 'default').'] on .'.$domain.", which also covers [{$host}] of site [{$other->name}]; give one of them its own session.cookie.");
+                    }
+                }
+            }
+        }
+
+        if (config('domain-routing.handoff.enabled') && ! config('session.secure') && app()->environment('production')) {
+            $this->warning('Handoff is on but session cookies are not marked secure in production.');
+        }
+
         $default = config('domain-routing.default');
 
         if (config('domain-routing.unmatched') === 'default') {
             if (! is_string($default) || ! $sites->has($default)) {
                 $this->failure("unmatched is 'default' but default names no site.");
-            } elseif ($sites->get($default)->canonicalHost() === null) {
-                $this->failure("The default site [{$default}] needs a plain canonical host.");
+            } elseif ($sites->get($default)->canonicalHost() === null || $sites->get($default)->dynamic) {
+                $this->failure("The default site [{$default}] needs a plain canonical host; unknown hosts get a 404 until it has one.");
             }
         }
 
@@ -69,11 +96,11 @@ final class DoctorCommand extends Command
             $this->warning("APP_URL host [{$appHost}] is served by no site, so it will answer 404.");
         }
 
-        if ($sites->hasDynamic() && config('domain-routing.unsited_routes', 'static') === 'everywhere') {
+        if (in_array(config('domain-routing.unsited_routes', 'exact'), ['everywhere', 'static'], true) && ($sites->hasDynamic() || collect($sites->all())->contains(fn ($s) => $s->hostParameterNames() !== []))) {
             $unsited = collect(app('router')->getRoutes()->getRoutes())->filter(fn ($route) => SiteValidator::siteOf($route->action) === null)->count();
 
             if ($unsited > 0) {
-                $this->warning("{$unsited} route(s) belong to no site and are reachable on dynamic (tenant) hosts too; set unsited_routes to static or put them on a site.");
+                $this->warning("{$unsited} route(s) belong to no site and are reachable on pattern or dynamic (tenant) hosts too; set unsited_routes to exact or put them on a site.");
             }
         }
 
