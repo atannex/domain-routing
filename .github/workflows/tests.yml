@@ -26,9 +26,6 @@ jobs:
           php: ${{ matrix.php }}
           extensions: intl, pdo_sqlite
           coverage: none
-      # atannex/routing's releases support Laravel 11/12 only; its #[Site] test skips on 13.
-      - if: startsWith(matrix.laravel, '13')
-        run: composer remove --dev atannex/routing --no-update --no-interaction
       - run: composer require "laravel/framework:${{ matrix.laravel }}" --no-update --no-interaction
       - run: composer update --${{ matrix.stability }} --prefer-dist --no-interaction
       - run: composer show laravel/framework | grep versions
@@ -83,8 +80,6 @@ jobs:
           php: '8.4'
           extensions: intl, pdo_mysql, pdo_pgsql, redis
           coverage: none
-      - if: startsWith(matrix.laravel, '13')
-        run: composer remove --dev atannex/routing --no-update --no-interaction
       - run: composer require "laravel/framework:${{ matrix.laravel }}" --no-update --no-interaction
       - run: composer update --prefer-dist --no-interaction
       - run: vendor/bin/pest
@@ -110,8 +105,6 @@ jobs:
           php: '8.4'
           extensions: intl, pdo_sqlite, redis
           coverage: none
-      - if: startsWith(matrix.laravel, '13')
-        run: composer remove --dev atannex/routing --no-update --no-interaction
       - run: composer require "laravel/framework:${{ matrix.laravel }}" --no-update --no-interaction
       - run: composer update --prefer-dist --no-interaction
       - run: vendor/bin/pest
