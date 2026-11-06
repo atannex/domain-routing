@@ -26,16 +26,22 @@ jobs:
           php: ${{ matrix.php }}
           extensions: intl, pdo_sqlite
           coverage: none
+      # atannex/routing's releases support Laravel 11/12 only; its #[Site] test skips on 13.
+      - if: startsWith(matrix.laravel, '13')
+        run: composer remove --dev atannex/routing --no-update --no-interaction
       - run: composer require "laravel/framework:${{ matrix.laravel }}" --no-update --no-interaction
       - run: composer update --${{ matrix.stability }} --prefer-dist --no-interaction
+      - run: composer show laravel/framework | grep versions
       - run: vendor/bin/pest
 
   databases:
-    name: ${{ matrix.db }} + Redis
+    name: ${{ matrix.db }} + Redis · Laravel ${{ matrix.laravel }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
+        laravel: ['12.*', '13.*']
+        db: [mysql, mariadb, pgsql]
         include:
           - db: mysql
             image: mysql:8.4
@@ -77,12 +83,19 @@ jobs:
           php: '8.4'
           extensions: intl, pdo_mysql, pdo_pgsql, redis
           coverage: none
-      - run: composer install --prefer-dist --no-interaction
+      - if: startsWith(matrix.laravel, '13')
+        run: composer remove --dev atannex/routing --no-update --no-interaction
+      - run: composer require "laravel/framework:${{ matrix.laravel }}" --no-update --no-interaction
+      - run: composer update --prefer-dist --no-interaction
       - run: vendor/bin/pest
 
   redis:
-    name: Redis cache (SQLite database)
+    name: Redis cache (SQLite database) · Laravel ${{ matrix.laravel }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        laravel: ['12.*', '13.*']
     services:
       redis:
         image: redis:7
@@ -97,7 +110,10 @@ jobs:
           php: '8.4'
           extensions: intl, pdo_sqlite, redis
           coverage: none
-      - run: composer install --prefer-dist --no-interaction
+      - if: startsWith(matrix.laravel, '13')
+        run: composer remove --dev atannex/routing --no-update --no-interaction
+      - run: composer require "laravel/framework:${{ matrix.laravel }}" --no-update --no-interaction
+      - run: composer update --prefer-dist --no-interaction
       - run: vendor/bin/pest
 
   standalone:
