@@ -56,9 +56,6 @@ return [
     // Add {account}-style host values to route parameters (static patterns only).
     'bind_host_parameters' => true,
 
-    // Without dynamic sites, also pin Symfony's trusted hosts to the site patterns.
-    'trusted_hosts' => true,
-
     'handoff' => [
         'enabled' => false,
         'path' => '_handoff',
