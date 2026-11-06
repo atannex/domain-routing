@@ -68,6 +68,8 @@ final class ResolveSite
 
         $response = $next($request);
 
+        $this->scopeCookies($response);
+
         if (config('domain-routing.debug_header')) {
             $response->headers->set('X-Site', $match->name());
         }
@@ -85,6 +87,10 @@ final class ResolveSite
 
         config($saved['config']);
         URL::forceRootUrl($saved['root']);
+
+        if (app()->resolved('session.store')) {
+            app('session.store')->setName((string) $saved['config']['session.cookie']);
+        }
 
         if ($saved['views'] !== null && app()->resolved('view') && ($finder = app('view')->getFinder()) instanceof FileViewFinder) {
             $finder->setPaths($saved['views']);
@@ -177,11 +183,35 @@ final class ResolveSite
             }
         }
 
-        // Remember-me and queued cookies take their defaults from the jar, not from config.
-        if (app()->resolved('cookie')) {
-            app('cookie')->setDefaultPathAndDomain(
-                config('session.path'), config('session.domain'), (bool) config('session.secure'), config('session.same_site'),
-            );
+        // Remember-me and queued cookies take their defaults from the jar: always host-only.
+        app('cookie')->setDefaultPathAndDomain(config('session.path'), null, (bool) config('session.secure'), config('session.same_site'));
+
+        // A store resolved before this request (Octane, workers) keeps its old cookie name otherwise.
+        if (app()->resolved('session.store')) {
+            app('session.store')->setName((string) config('session.cookie'));
+        }
+    }
+
+    /**
+     * Only the session cookie may carry a shared parent domain. XSRF-TOKEN is
+     * readable by script, and remember-me signs people in, so neither may reach
+     * sibling sites (tenant subdomains included): they are made host-only.
+     */
+    private function scopeCookies(Response $response): void
+    {
+        if (! config('domain-routing.isolate_sessions', true)) {
+            return;
+        }
+
+        $keep = [(string) config('session.cookie'), ...(array) config('domain-routing.shared_cookies', [])];
+
+        foreach ($response->headers->getCookies() as $cookie) {
+            if ($cookie->getDomain() === null || in_array($cookie->getName(), $keep, true)) {
+                continue;
+            }
+
+            $response->headers->removeCookie($cookie->getName(), $cookie->getPath(), $cookie->getDomain());
+            $response->headers->setCookie($cookie->withDomain(null));
         }
     }
 

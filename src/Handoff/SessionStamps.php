@@ -23,6 +23,14 @@ final class SessionStamps
         return (string) $this->store()->get($this->key($guard, $userId), '0');
     }
 
+    /** The realm (user table) is part of the key: user #1 of one tenant database is not user #1 of another. */
+    private function realm(string $guard): string
+    {
+        $instance = auth()->guard($guard);
+
+        return $instance instanceof SessionGuard ? UserRealm::of($instance) : 'none';
+    }
+
     public function revokeAll(Authenticatable $user, ?string $guard = null): void
     {
         $guard ??= (string) config('auth.defaults.guard');
@@ -54,7 +62,7 @@ final class SessionStamps
 
     private function key(string $guard, string $userId): string
     {
-        return 'domain-routing:stamp:'.$guard.':'.$userId;
+        return 'domain-routing:stamp:'.$this->realm($guard).':'.$guard.':'.$userId;
     }
 
     private function store(): Repository

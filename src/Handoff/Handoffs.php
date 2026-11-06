@@ -10,10 +10,11 @@ use Atannex\DomainRouting\Events\HandoffRejected;
 use Atannex\DomainRouting\Exceptions\InvalidHandoffTarget;
 use Atannex\DomainRouting\Hosts\HostNormalizer;
 use Atannex\DomainRouting\Resolution\SiteContext;
+use Atannex\DomainRouting\Resolution\SiteMatch;
 use Atannex\DomainRouting\Resolution\SiteResolver;
 use Atannex\DomainRouting\Support\CentralCache;
-use Illuminate\Auth\EloquentUserProvider;
 use Illuminate\Auth\SessionGuard;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Auth\Factory as AuthFactory;
 use Illuminate\Contracts\Cache\LockProvider;
 use Illuminate\Contracts\Cache\Repository;
@@ -41,6 +42,11 @@ final class Handoffs
 {
     public const string COOKIE = 'domain_routing_handoff';
 
+    private const string NONCE = 'domain_routing.handoff';
+
+    /** @var (\Closure(SiteMatch, ?Authenticatable): bool)|null */
+    private static ?\Closure $authorizer = null;
+
     public function __construct(
         private readonly SiteResolver $resolver,
         private readonly SiteContext $context,
@@ -51,10 +57,19 @@ final class Handoffs
     /** On site A: send the signed-in user to $url on another site, signed in there too. */
     public function to(string $url, ?string $guard = null): RedirectResponse
     {
-        [$origin, $path] = $this->target($url);
-        $from = $this->origin(request());
+        [$origin, $path] = $this->target($url, authorize: true);
+        $request = request();
+        $from = $this->origin($request);
 
-        $query = http_build_query(array_filter(['from' => $from, 'r' => $path, 'g' => $guard]));
+        if (! $this->allowedHost($request->getHost()) || ! $request->hasSession()) {
+            throw InvalidHandoffTarget::for($from);
+        }
+
+        // Only an exchange this session started can be issued: a forged link to /issue finds no nonce.
+        $nonce = $this->random();
+        $request->session()->put(self::NONCE.'.'.hash('sha256', $nonce), ['to' => $this->siteKey($origin), 'expires' => time() + (int) config('domain-routing.handoff.state_ttl', 300)]);
+
+        $query = http_build_query(array_filter(['from' => $from, 'r' => $path, 'g' => $guard, 'n' => $nonce]));
 
         return $this->noStore(new RedirectResponse($origin.'/'.$this->path('start').'?'.$query));
     }
@@ -76,7 +91,12 @@ final class Handoffs
             'to' => $this->origin($request),
             'r' => self::safePath((string) $request->query('r', '/')),
             'g' => $this->guardName($request->query('g')),
+            'n' => is_string($request->query('n')) ? $request->query('n') : null,
         ]));
+
+        if (! $this->allowedHost($request->getHost())) {
+            return $this->reject(RejectionReason::UnknownHost, $request);
+        }
 
         $response = $this->noStore(new RedirectResponse($origin.'/'.$this->path('issue').'?'.$query));
         $minutes = max(1, (int) ceil((int) config('domain-routing.handoff.state_ttl', 300) / 60));
@@ -95,17 +115,28 @@ final class Handoffs
             return $this->reject(RejectionReason::Malformed, $request);
         }
 
-        try {
-            [$origin] = $this->target($to);
-        } catch (InvalidHandoffTarget) {
+        if (! $this->allowedHost($request->getHost())) {
             return $this->reject(RejectionReason::UnknownHost, $request);
         }
 
         $guardName = $this->guardName($request->query('g'));
         $guard = $guardName === null ? null : $this->auth->guard($guardName);
 
+        try {
+            [$origin] = $this->target($to, authorize: $guard instanceof SessionGuard && $guard->check());
+        } catch (InvalidHandoffTarget) {
+            return $this->reject(RejectionReason::UnknownHost, $request);
+        }
+
         if (! $guard instanceof SessionGuard || ! $guard->check()) {
             return $this->noStore(new RedirectResponse($origin.$path));
+        }
+
+        $nonce = $request->query('n');
+        $pending = is_string($nonce) && $request->hasSession() ? $request->session()->pull(self::NONCE.'.'.hash('sha256', $nonce)) : null;
+
+        if (! is_array($pending) || ! hash_equals((string) ($pending['to'] ?? ''), $this->siteKey($origin)) || ($pending['expires'] ?? 0) < time()) {
+            return $this->reject(RejectionReason::NotStarted, $request);
         }
 
         $token = $this->random();
@@ -118,7 +149,7 @@ final class Handoffs
             'host' => $host,
             'path' => $path,
             'state' => $state,
-            'realm' => $this->realm($guard),
+            'realm' => UserRealm::of($guard),
             'site' => $this->context->current()?->name(),
             'ip' => config('domain-routing.handoff.bind_ip') ? $request->ip() : null,
             'agent' => config('domain-routing.handoff.bind_user_agent') ? hash('sha256', (string) $request->userAgent()) : null,
@@ -140,6 +171,10 @@ final class Handoffs
 
         if (! $request->hasSession()) {
             return $this->reject(RejectionReason::NoSession, $request);
+        }
+
+        if (! $this->allowedHost($request->getHost())) {
+            return $this->reject(RejectionReason::UnknownHost, $request);
         }
 
         $store = $this->store();
@@ -185,7 +220,7 @@ final class Handoffs
         }
 
         // Same users table on both sides, or the id would name someone else.
-        if (! hash_equals((string) $payload['realm'], $this->realm($guard))) {
+        if (! hash_equals((string) $payload['realm'], UserRealm::of($guard))) {
             return $this->reject(RejectionReason::RealmMismatch, $request);
         }
 
@@ -216,13 +251,13 @@ final class Handoffs
     }
 
     /** @return array{0: string, 1: string} [origin, path] of a URL on a host some site serves */
-    private function target(string $url): array
+    private function target(string $url, bool $authorize = false): array
     {
         $parts = parse_url($url);
         $scheme = strtolower((string) ($parts['scheme'] ?? ''));
         $host = HostNormalizer::normalize((string) ($parts['host'] ?? ''));
 
-        if (! in_array($scheme, ['http', 'https'], true) || isset($parts['user']) || $this->resolver->resolve($host) === null) {
+        if (! in_array($scheme, ['http', 'https'], true) || isset($parts['user']) || ! $this->allowedHost($host, $authorize)) {
             throw InvalidHandoffTarget::for($url);
         }
 
@@ -236,30 +271,70 @@ final class Handoffs
         return [$origin, $path];
     }
 
+    /** The site (and its host values) an origin belongs to: www and apex of one site are the same target. */
+    private function siteKey(string $origin): string
+    {
+        $match = $this->resolver->resolve((string) parse_url($origin, PHP_URL_HOST));
+
+        return $match === null ? '' : $match->name().'|'.json_encode($match->parameters);
+    }
+
     private function origin(Request $request): string
     {
         return $request->getSchemeAndHttpHost();
     }
 
+    /** Only guards listed in handoff.guards (default: the default guard) can be handed off. */
     private function guardName(mixed $name): ?string
     {
-        $name = is_string($name) && $name !== '' ? $name : (string) (config('domain-routing.handoff.guard') ?? config('auth.defaults.guard'));
+        $default = (string) (config('domain-routing.handoff.guard') ?? config('auth.defaults.guard'));
+        $name = is_string($name) && $name !== '' ? $name : $default;
+        $allowed = (array) (config('domain-routing.handoff.guards') ?? [$default]);
 
-        return is_array(config('auth.guards.'.$name)) ? $name : null;
+        return in_array($name, $allowed, true) && is_array(config('auth.guards.'.$name)) ? $name : null;
     }
 
-    /** Fingerprint of where the guard's users live (driver, database, host): tenant databases differ. */
-    private function realm(SessionGuard $guard): string
+    /**
+     * Hosts that may send or receive a session: the sites in handoff.sites (all
+     * sites when null), and never a dynamic host (a tenant's custom domain is
+     * controlled by the tenant's DNS) unless handoff.dynamic is on and the
+     * authorizer agrees.
+     */
+    private function allowedHost(string $host, bool $authorize = false): bool
     {
-        $provider = $guard->getProvider();
+        $match = $this->resolver->resolve($host);
 
-        if (! $provider instanceof EloquentUserProvider) {
-            return hash('sha256', get_class($provider));
+        if ($match === null) {
+            return false;
         }
 
-        $connection = $provider->createModel()->getConnection();
+        $sites = config('domain-routing.handoff.sites');
 
-        return hash('sha256', implode('|', [$connection->getDriverName(), $connection->getDatabaseName(), (string) $connection->getConfig('host'), $provider->getModel()]));
+        if (is_array($sites) && ! in_array($match->name(), $sites, true)) {
+            return false;
+        }
+
+        if ($match->source !== SiteMatch::PROVIDER) {
+            return true;
+        }
+
+        if (config('domain-routing.handoff.dynamic', false) !== true || self::$authorizer === null) {
+            return false;
+        }
+
+        // The user is known when the token is minted; start and redeem only need the host to be allowed.
+        return ! $authorize || (bool) (self::$authorizer)($match, $this->auth->guard()->user());
+    }
+
+    /**
+     * Allow handoffs to and from dynamic hosts (tenant custom domains), with
+     * your own check, e.g. that the user is a member of that tenant.
+     *
+     * @param  (\Closure(SiteMatch, ?Authenticatable): bool)|null  $callback
+     */
+    public static function authorizeDynamicUsing(?\Closure $callback): void
+    {
+        self::$authorizer = $callback;
     }
 
     private function reject(RejectionReason $reason, Request $request): RejectionReason

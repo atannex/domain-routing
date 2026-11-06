@@ -5,14 +5,27 @@ declare(strict_types=1);
 use Atannex\DomainRouting\Tests\Fixtures\Controllers\EchoController;
 use Illuminate\Support\Facades\Route;
 
-it('answers the TLS ask for served hosts only, from any host', function () {
+it('approves certificates for exact hosts only, unless a pattern site opts in', function () {
     $this->withSettings(['domain-routing.tls_ask.enabled' => true]);
+    $ask = 'http://127.0.0.1/domain-routing/tls/ask?domain=';
 
-    $this->get('http://127.0.0.1/domain-routing/tls/ask?domain=www.atannex.test')->assertOk();
-    $this->get('http://127.0.0.1/domain-routing/tls/ask?domain=acme.app.test')->assertOk();
-    $this->get('http://127.0.0.1/domain-routing/tls/ask?domain=evil.example')->assertNotFound();
-    $this->get('http://127.0.0.1/domain-routing/tls/ask?domain=www.app.test')->assertNotFound();
+    $this->get($ask.'www.atannex.test')->assertOk();
+    $this->get($ask.'made-up-label.app.test')->assertNotFound(); // would burn the CA's rate limit
+    $this->get($ask.'evil.example')->assertNotFound();
     $this->get('http://127.0.0.1/domain-routing/tls/ask')->assertNotFound();
+
+    $this->withSites(['app' => ['hosts' => ['{account}.app.test'], 'tls' => true]], ['domain-routing.tls_ask.enabled' => true]);
+    $this->get($ask.'acme.app.test')->assertOk();
+});
+
+it('answers the TLS ask only to allowed IPs or the secret', function () {
+    $this->withSettings(['domain-routing.tls_ask.enabled' => true, 'domain-routing.tls_ask.secret' => 's3cret']);
+    $ask = 'http://evil.example/domain-routing/tls/ask?domain=atannex.test';
+
+    $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.9'])->get($ask)->assertNotFound();
+    $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.9'])->get($ask.'&secret=wrong')->assertNotFound();
+    $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.9'])->get($ask.'&secret=s3cret')->assertOk();
+    $this->withServerVariables(['REMOTE_ADDR' => '10.1.2.3'])->get($ask)->assertOk();
 });
 
 it('sends HSTS on secure responses when configured', function () {

@@ -31,18 +31,19 @@ final class HostPattern
         public readonly string $shape,
         private readonly string $regex,
         private readonly array $constraints,
+        public readonly bool $refusesReserved = true,
     ) {}
 
     /** @param array<string, string> $where */
-    public static function parse(string $raw, array $where = []): self
+    public static function parse(string $raw, array $where = [], bool $reserved = true): self
     {
-        $key = $raw."\0".serialize($where);
+        $key = $raw."\0".serialize($where)."\0".(int) $reserved;
 
-        return self::$compiled[$key] ??= self::compile($raw, $where);
+        return self::$compiled[$key] ??= self::compile($raw, $where, $reserved);
     }
 
     /** @param array<string, string> $where */
-    private static function compile(string $raw, array $where): self
+    private static function compile(string $raw, array $where, bool $reserved): self
     {
         $raw = trim($raw);
 
@@ -73,7 +74,7 @@ final class HostPattern
 
                 $constraints[$name] = $where[$name] ?? self::DEFAULT_PARAMETER;
 
-                if (@preg_match('#^(?:'.$constraints[$name].')$#', '') === false) {
+                if (@preg_match('#^(?:'.$constraints[$name].')$#D', '') === false) {
                     throw InvalidHostPattern::for($raw, "the constraint for [{$name}] is not a valid regular expression");
                 }
                 $parameters[] = $name;
@@ -114,7 +115,8 @@ final class HostPattern
             throw InvalidHostPattern::for($raw, 'not a valid host name');
         }
 
-        return new self($pattern, $parameters, $literal, $shape, '#^'.$regex.'$#', $constraints);
+        // D: "$" must not match before a trailing newline.
+        return new self($pattern, $parameters, $literal, $shape, '#^'.$regex.'$#D', $constraints, $reserved);
     }
 
     public function isExact(): bool
@@ -140,13 +142,19 @@ final class HostPattern
 
         $values = array_intersect_key($m, array_flip($this->parameters));
 
-        foreach ($values as $name => $value) {
-            if ($this->constraints[$name] === self::DEFAULT_PARAMETER && in_array($value, self::$reserved, true)) {
+        foreach ($values as $value) {
+            if ($this->isReserved($value)) {
                 return null;
             }
         }
 
         return $values;
+    }
+
+    /** A single label such as "www" or "mail" is never a parameter value, whatever the constraint. */
+    private function isReserved(string $value): bool
+    {
+        return $this->refusesReserved && ! str_contains($value, '.') && in_array($value, self::$reserved, true);
     }
 
     /** @param array<string, mixed> $values */
@@ -162,8 +170,7 @@ final class HostPattern
             $value = $values[$name] instanceof UrlRoutable ? $values[$name]->getRouteKey() : $values[$name];
             $value = strtolower((string) $value);
 
-            if (! preg_match('#^(?:'.$this->constraints[$name].')$#', $value)
-                || ($this->constraints[$name] === self::DEFAULT_PARAMETER && in_array($value, self::$reserved, true))) {
+            if (! preg_match('#^(?:'.$this->constraints[$name].')$#D', $value) || $this->isReserved($value)) {
                 throw InvalidHostParameter::for($site, $name, $value);
             }
 

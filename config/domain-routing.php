@@ -29,6 +29,8 @@ return [
      *     'config' => [],           // config values for this site's requests, e.g. ['app.name' => 'Shop']
      *     'views' => [],            // view paths searched first on this site
      *     'stateful' => false,      // add this host to sanctum.stateful for its requests (SPA sign-in)
+     *     'tls' => false,           // TLS ask approves any {parameter} host of this site
+     *     'reserved_labels' => true,// false: {parameter} may take www, mail…
      * ],
      */
     'sites' => [],
@@ -64,9 +66,14 @@ return [
     'isolate_rate_limits' => true,
 
     // On-demand TLS ask endpoint: GET {path}?domain=host → 200 when a site serves the host.
+    // Approves exact hosts and verified dynamic hosts only: never made-up labels under a
+    // {parameter} pattern (that would burn the certificate authority's rate limit) unless
+    // the site sets 'tls' => true. Answers only the IPs in allow, or callers with the secret.
     'tls_ask' => [
         'enabled' => false,
         'path' => 'domain-routing/tls/ask',
+        'allow' => ['127.0.0.1', '::1', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'],
+        'secret' => env('DOMAIN_ROUTING_TLS_SECRET'),
         'middleware' => ['throttle:120,1'],
     ],
 
@@ -83,8 +90,12 @@ return [
 
     'shared_routes' => ['livewire*', 'broadcasting/*', 'sanctum/*', 'storage/*', 'up'],
 
-    // Session cookies stay on the exact host unless a site sets session.domain.
+    // Session cookies stay on the exact host unless a site sets session.domain;
+    // every other cookie (XSRF-TOKEN, remember-me, yours) stays host-only,
+    // except the names in shared_cookies.
     'isolate_sessions' => true,
+
+    'shared_cookies' => [],
 
     // prefix ("app.dashboard") | none
     'route_names' => 'prefix',
@@ -98,6 +109,13 @@ return [
         'ttl' => 60,
         'state_ttl' => 300,
         'guard' => null,
+        // Guards that can be handed off (null = only the default guard).
+        'guards' => null,
+        // Sites that may send or receive a session (null = all). Dynamic hosts
+        // (tenant custom domains) never do unless 'dynamic' is true AND you
+        // register Handoffs::authorizeDynamicUsing(fn ($match, $user) => …).
+        'sites' => null,
+        'dynamic' => false,
         'bind_ip' => false,
         'bind_user_agent' => false,
         // A cache store with atomic locks (redis, database, memcached). Never tenant-prefixed.

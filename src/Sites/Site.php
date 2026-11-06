@@ -42,6 +42,8 @@ final readonly class Site
         public array $config = [],
         public array $views = [],
         public bool $stateful = false,
+        public bool $tls = false,
+        public bool $reserved = true,
     ) {}
 
     /**
@@ -77,6 +79,8 @@ final readonly class Site
             config: (array) ($config['config'] ?? []),
             views: array_values(array_map('strval', (array) ($config['views'] ?? []))),
             stateful: (bool) ($config['stateful'] ?? false),
+            tls: (bool) ($config['tls'] ?? false),
+            reserved: (bool) ($config['reserved_labels'] ?? true),
         );
     }
 
@@ -116,14 +120,14 @@ final readonly class Site
     /** @return list<HostPattern> */
     public function patterns(): array
     {
-        return array_map(fn (string $host) => HostPattern::parse($host, $this->where), $this->hosts);
+        return array_map(fn (string $host) => HostPattern::parse($host, $this->where, $this->reserved), $this->hosts);
     }
 
     public function canonicalPattern(): ?HostPattern
     {
         $host = $this->canonical ?? $this->hosts[0] ?? null;
 
-        return $host === null ? null : HostPattern::parse($host, $this->where);
+        return $host === null ? null : HostPattern::parse($host, $this->where, $this->reserved);
     }
 
     /** The canonical host when it is a plain host (no parameters). */
@@ -153,7 +157,7 @@ final readonly class Site
         }
 
         return new self($this->name, $this->hosts, $this->dynamic, $this->canonical, $this->scheme, $this->port, $this->routes,
-            [$middleware, ...$this->middleware], $this->where, $this->session, $this->redirects, $this->robots, $this->assetUrl, $this->meta, $this->unsited, $this->config, $this->views, $this->stateful);
+            [$middleware, ...$this->middleware], $this->where, $this->session, $this->redirects, $this->robots, $this->assetUrl, $this->meta, $this->unsited, $this->config, $this->views, $this->stateful, $this->tls, $this->reserved);
     }
 
     /** Is the given host (already normalised) one of this site's exact hosts? */

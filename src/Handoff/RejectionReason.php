@@ -18,5 +18,6 @@ enum RejectionReason: string
     case RealmMismatch = 'realm_mismatch';
     case SessionConflict = 'session_conflict';
     case NoSession = 'no_session';
+    case NotStarted = 'not_started';
     case StoreUnavailable = 'store_unavailable';
 }

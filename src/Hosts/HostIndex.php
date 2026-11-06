@@ -12,7 +12,7 @@ final class HostIndex
 {
     /**
      * @param  array<string, string>  $exact  host => site
-     * @param  list<array{0: string, 1: string, 2: array<string, string>}>  $patterns  [pattern, site, where]
+     * @param  list<array{0: string, 1: string, 2: array<string, string>, 3?: bool}>  $patterns  [pattern, site, where, reserved]
      * @param  list<string>  $conflicts
      */
     private function __construct(
@@ -62,14 +62,14 @@ final class HostIndex
                 }
 
                 $shapes[$pattern->shape] = $site->name;
-                $patterns[] = [$pattern->pattern, $site->name, $site->where, $pattern->literalLength];
+                $patterns[] = [$pattern->pattern, $site->name, $site->where, $pattern->literalLength, $site->reserved];
             }
         }
 
         // Stable sort: most literal characters first, then declaration order.
         usort($patterns, fn (array $a, array $b) => $b[3] <=> $a[3]);
 
-        return new self($exact, array_map(fn (array $p) => [$p[0], $p[1], $p[2]], $patterns), $conflicts);
+        return new self($exact, array_map(fn (array $p) => [$p[0], $p[1], $p[2], $p[4]], $patterns), $conflicts);
     }
 
     /** @return array{site: string, parameters: array<string, string>, kind: 'exact'|'pattern'}|null */
@@ -79,8 +79,9 @@ final class HostIndex
             return ['site' => $this->exact[$host], 'parameters' => [], 'kind' => 'exact'];
         }
 
-        foreach ($this->patterns as [$pattern, $site, $where]) {
-            $parameters = HostPattern::parse($pattern, $where)->matches($host);
+        foreach ($this->patterns as $entry) {
+            [$pattern, $site, $where] = $entry;
+            $parameters = HostPattern::parse($pattern, $where, $entry[3] ?? true)->matches($host);
 
             if ($parameters !== null) {
                 return ['site' => $site, 'parameters' => $parameters, 'kind' => 'pattern'];
@@ -96,7 +97,8 @@ final class HostIndex
         $regexes = array_map(fn (string $host) => '^'.preg_quote($host, '#').'$', array_keys($this->exact));
 
         foreach ($this->patterns as [$pattern, , $where]) {
-            $regexes[] = substr(HostPattern::parse($pattern, $where)->regex(), 1, -1);
+            $regex = HostPattern::parse($pattern, $where)->regex();
+            $regexes[] = substr($regex, 1, strrpos($regex, '#') - 1);
         }
 
         return $regexes;

@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Atannex\DomainRouting\Exceptions\InvalidHandoffTarget;
 use Atannex\DomainRouting\Handoff\Handoffs;
 use Atannex\DomainRouting\Handoff\SessionStamps;
 use Atannex\DomainRouting\Support\CentralCache;
@@ -30,7 +31,16 @@ beforeEach(function () {
     Route::site('tenant', fn () => Route::get('/me', fn () => tenant()?->getTenantSlug().':'.(auth()->id() ?? 'guest')));
 });
 
-it('hands a central session to a tenant domain, with tenancy initialised for the redeem', function () {
+it('refuses tenant domains by default: a tenant controls its own DNS', function () {
+    $this->actingAs($this->user);
+
+    expect(fn () => $this->withoutExceptionHandling()->get('http://central.test/go?to='.urlencode('http://acme-shop.example/me')))
+        ->toThrow(InvalidHandoffTarget::class);
+});
+
+it('hands a central session to a tenant domain when allowed, with tenancy initialised for the redeem', function () {
+    config(['domain-routing.handoff.dynamic' => true]);
+    Handoffs::authorizeDynamicUsing(fn ($match, $user) => $match->parameters['tenant'] === 'acme' && $user?->getAuthIdentifier() === $this->user->id);
     $this->actingAs($this->user);
     $start = $this->get($this->get('http://central.test/go?to='.urlencode('http://acme-shop.example/me'))->headers->get('Location'));
     $state = $start->getCookie(Handoffs::COOKIE)->getValue();
@@ -42,6 +52,7 @@ it('hands a central session to a tenant domain, with tenancy initialised for the
 
     $this->withCookie(Handoffs::COOKIE, $state)->get($redeem)->assertRedirect('/me');
     $this->assertAuthenticatedAs($this->user);
+    Handoffs::authorizeDynamicUsing(null);
 });
 
 it('keeps tokens and stamps out of the per-tenant cache prefix', function () {
@@ -57,4 +68,8 @@ it('keeps tokens and stamps out of the per-tenant cache prefix', function () {
     expect(CentralCache::store(null)->get('domain-routing:probe'))->toBe('same everywhere')
         ->and(app(SessionStamps::class)->current('web', (string) $this->user->id))->toBe($stamp)
         ->and($stamp)->not->toBe('0');
+});
+
+it('refuses a tenant domain as the source of a handoff (login CSRF through a tenant server)', function () {
+    $this->get('http://central.test/_handoff/start?from='.urlencode('http://acme-shop.example'))->assertForbidden();
 });

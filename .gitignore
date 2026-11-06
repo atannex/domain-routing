@@ -3,3 +3,5 @@
 /.phpunit.cache/
 composer.lock
 .phpunit.result.cache
+/UPGRADE.md
+/CHANGELOG.md
