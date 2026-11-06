@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Atannex\DomainRouting\Routing;
 
+use Atannex\DomainRouting\Integrations\Tenancy\TenancyIntegration;
 use Atannex\DomainRouting\Sites\Site;
 use Atannex\DomainRouting\Sites\SiteRegistry;
 use Closure;
@@ -15,13 +16,26 @@ final class SiteRoutes
     /** @return array<string, mixed> */
     public static function attributes(Site $site): array
     {
-        $attributes = ['site' => $site->name, 'middleware' => $site->middleware];
+        $attributes = ['site' => $site->name, 'middleware' => self::middleware($site)];
 
         if (config('domain-routing.route_names', 'prefix') === 'prefix') {
             $attributes['as'] = $site->name.'.';
         }
 
         return $attributes;
+    }
+
+    /** @return list<string> the site's middleware, with integration middleware in front */
+    public static function middleware(Site $site): array
+    {
+        $middleware = $site->middleware;
+        $tenancy = TenancyIntegration::middleware($site->name);
+
+        if ($tenancy !== null && ! in_array($tenancy, $middleware, true)) {
+            array_unshift($middleware, $tenancy);
+        }
+
+        return $middleware;
     }
 
     public static function macro(): void

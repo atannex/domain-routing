@@ -85,6 +85,14 @@ it('binds to the IP when asked', function () {
     $this->withServerVariables(['REMOTE_ADDR' => '10.9.9.9'])->get($url)->assertForbidden();
 });
 
+it('binds the token to the browser that asked for it', function () {
+    $url = $this->withHeader('User-Agent', 'Browser A')->get('http://atannex.test/me') && true
+        ? app(Handoffs::class)->url($this->user, 'http://acme.app.test/me') : '';
+
+    $this->withHeader('User-Agent', 'Browser B')->get($url)->assertForbidden();
+    $this->assertGuest();
+});
+
 it('rejects users that no longer exist', function () {
     $url = app(Handoffs::class)->url($this->user, 'http://acme.app.test/me');
     $this->user->delete();

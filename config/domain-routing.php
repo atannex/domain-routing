@@ -47,8 +47,18 @@ return [
         'redirects' => [],     // applied on every site after the site's own map
     ],
 
-    // Routes outside any site match only when no site resolved.
-    'strict_routes' => false,
+    /*
+     * Routes outside any site: everywhere | static | none.
+     * static (default) serves them on exact and pattern hosts but never on
+     * dynamic hosts (tenant custom domains), so central and admin routes can't
+     * leak onto a tenant's domain. shared_routes are the exceptions (URI patterns).
+     */
+    'unsited_routes' => 'static',
+
+    'shared_routes' => ['livewire*', 'broadcasting/*', 'sanctum/*', 'storage/*', 'up'],
+
+    // Session cookies stay on the exact host unless a site sets session.domain.
+    'isolate_sessions' => true,
 
     // prefix ("app.dashboard") | none
     'route_names' => 'prefix',
@@ -61,6 +71,7 @@ return [
         'path' => '_handoff',
         'ttl' => 60,
         'bind_ip' => false,
+        'bind_user_agent' => true,
         'store' => null,
         'middleware' => ['web', 'throttle:60,1'],
     ],

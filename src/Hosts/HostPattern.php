@@ -63,7 +63,16 @@ final class HostPattern
                 }
 
                 $name = $m[1];
+
+                if (in_array($name, $parameters, true)) {
+                    throw InvalidHostPattern::for($raw, "parameter [{$name}] appears twice");
+                }
+
                 $constraints[$name] = $where[$name] ?? self::DEFAULT_PARAMETER;
+
+                if (@preg_match('#^(?:'.$constraints[$name].')$#', '') === false) {
+                    throw InvalidHostPattern::for($raw, "the constraint for [{$name}] is not a valid regular expression");
+                }
                 $parameters[] = $name;
                 $regex .= '(?P<'.$name.'>'.$constraints[$name].')';
                 $pattern .= '{'.$name.'}';

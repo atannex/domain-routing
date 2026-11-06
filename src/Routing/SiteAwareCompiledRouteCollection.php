@@ -38,7 +38,7 @@ final class SiteAwareCompiledRouteCollection extends CompiledRouteCollection
     {
         $route = parent::match($request);
 
-        if (SiteValidator::allows(SiteValidator::siteOf($route->action), $request)) {
+        if (SiteValidator::allows($route, $request)) {
             return $route;
         }
 
@@ -56,7 +56,8 @@ final class SiteAwareCompiledRouteCollection extends CompiledRouteCollection
         foreach ($this->attributes as $attributes) {
             $owner = SiteValidator::siteOf((array) ($attributes['action'] ?? []));
 
-            if ($owner === $site || ($owner === null && ! SiteValidator::$strict)) {
+            // Candidates only; SiteValidator still decides for unsited routes.
+            if ($owner === $site || $owner === null || $owner === SiteValidator::ANY) {
                 $collection->add($this->newRoute($attributes));
             }
         }

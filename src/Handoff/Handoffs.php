@@ -63,6 +63,7 @@ final class Handoffs
             'path' => $path,
             'site' => $this->context->current()?->name(),
             'ip' => config('domain-routing.handoff.bind_ip') ? request()->ip() : null,
+            'agent' => config('domain-routing.handoff.bind_user_agent', true) && app()->bound('request') ? hash('sha256', (string) request()->userAgent()) : null,
             'issued' => time(),
         ], (int) config('domain-routing.handoff.ttl', 60));
 
@@ -107,6 +108,10 @@ final class Handoffs
 
         if ($payload['ip'] !== null && ! hash_equals((string) $payload['ip'], (string) $request->ip())) {
             return $this->reject(RejectionReason::IpMismatch, $host);
+        }
+
+        if (($payload['agent'] ?? null) !== null && ! hash_equals((string) $payload['agent'], hash('sha256', (string) $request->userAgent()))) {
+            return $this->reject(RejectionReason::AgentMismatch, $host);
         }
 
         if (! is_array(config('auth.guards.'.$payload['guard']))) {

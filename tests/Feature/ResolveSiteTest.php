@@ -7,6 +7,7 @@ use Atannex\DomainRouting\Events\SiteResolved;
 use Atannex\DomainRouting\Tests\Fixtures\Controllers\EchoController;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\URL;
 
 beforeEach(function () {
     Route::get('/whoami', EchoController::class);
@@ -61,6 +62,38 @@ it('applies the site session cookie settings', function () {
     Route::get('/cookie', fn () => config('session.cookie'));
 
     $this->get('http://app.test/cookie')->assertSee('atx_app');
+});
+
+it('keeps session cookies on the site host even with a shared SESSION_DOMAIN', function () {
+    config(['session.domain' => '.atannex.test']);
+    Route::get('/domain', fn () => var_export(config('session.domain'), true));
+
+    $this->get('http://atannex.test/domain')->assertSee('NULL');
+    expect(config('session.domain'))->toBe('.atannex.test'); // put back after the request
+});
+
+it('shares the session domain when a site asks for it', function () {
+    $this->withSites(['m' => ['hosts' => ['atannex.test'], 'session' => ['domain' => '.atannex.test']]]);
+    Route::get('/domain', fn () => config('session.domain'));
+
+    $this->get('http://atannex.test/domain')->assertSee('.atannex.test');
+});
+
+it('forgets the site between requests', function () {
+    Route::get('/up', fn () => var_export(current_site()?->name(), true));
+
+    $this->get('http://api.atannex.test/whoami')->assertJson(['site' => 'api']);
+    $this->get('http://api.atannex.test/up')->assertSee('NULL');
+    expect(current_site())->toBeNull();
+});
+
+it('puts back the root URL the app forced', function () {
+    $this->withSettings(['domain-routing.unmatched' => 'default', 'domain-routing.default' => 'marketing']);
+    URL::forceRootUrl('https://app-root.test');
+    Route::get('/whoami', EchoController::class);
+
+    $this->get('http://forged.example/whoami')->assertOk();
+    expect(url('/x'))->toEndWith('://app-root.test/x');
 });
 
 it('adds the debug header only when asked', function () {

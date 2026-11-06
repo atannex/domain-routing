@@ -25,6 +25,8 @@ use Symfony\Component\HttpFoundation\Response;
 /** Global: request host → site. Runs after TrustProxies and before the session starts. */
 final class ResolveSite
 {
+    private const array SESSION_KEYS = ['cookie', 'domain', 'path', 'secure', 'same_site', 'partitioned'];
+
     public function __construct(
         private readonly SiteRegistry $sites,
         private readonly SiteResolver $resolver,
@@ -34,8 +36,15 @@ final class ResolveSite
 
     public function handle(Request $request, Closure $next): Response
     {
+        $previous = $this->context->current();
+        $this->context->set(null);
+
         if ($this->sites->isEmpty() || $request->is(...(array) config('domain-routing.except', []))) {
-            return $next($request);
+            try {
+                return $next($request);
+            } finally {
+                $this->context->set($previous);
+            }
         }
 
         $match = $this->resolver->resolve($request->getHost());
@@ -49,15 +58,37 @@ final class ResolveSite
             }
         }
 
-        $this->enter($request, $match);
+        // Everything changed for this request is put back afterwards (Octane, workers, tests).
+        $config = $this->sessionConfig();
+        $root = URL::domainRoutingForcedRoot();
 
-        $response = $next($request);
+        try {
+            $this->enter($request, $match);
 
-        if (config('domain-routing.debug_header')) {
-            $response->headers->set('X-Site', $match->name());
+            $response = $next($request);
+
+            if (config('domain-routing.debug_header')) {
+                $response->headers->set('X-Site', $match->name());
+            }
+
+            return $response;
+        } finally {
+            config($config);
+            URL::forceRootUrl($root);
+            $this->context->set($previous);
+        }
+    }
+
+    /** @return array<string, mixed> */
+    private function sessionConfig(): array
+    {
+        $values = [];
+
+        foreach (self::SESSION_KEYS as $key) {
+            $values['session.'.$key] = config('session.'.$key);
         }
 
-        return $response;
+        return $values;
     }
 
     private function fallback(Request $request): SiteMatch|Response
@@ -83,6 +114,7 @@ final class ResolveSite
     {
         $this->context->set($match);
         $request->attributes->set(SiteValidator::ATTRIBUTE, $match->name());
+        $request->attributes->set(SiteValidator::SOURCE, $match->source);
 
         Log::withContext(['site' => $match->name(), 'site_host' => $match->host, 'site_source' => $match->source]);
 
@@ -91,7 +123,12 @@ final class ResolveSite
             URL::forceRootUrl(app(HostBuilder::class)->rootFor($match->site, $match->host));
         }
 
-        foreach (['cookie', 'domain', 'path', 'secure', 'same_site'] as $key) {
+        // Cookies stay on this host unless the site shares them on purpose (session.domain).
+        if (config('domain-routing.isolate_sessions', true) && ! array_key_exists('domain', $match->site->session)) {
+            config(['session.domain' => null]);
+        }
+
+        foreach (self::SESSION_KEYS as $key) {
             if (array_key_exists($key, $match->site->session)) {
                 config(['session.'.$key => $match->site->session[$key]]);
             }

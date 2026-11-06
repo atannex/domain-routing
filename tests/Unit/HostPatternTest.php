@@ -56,6 +56,11 @@ it('rejects non-ascii literals next to parameters', function () {
     HostPattern::parse('{a}.bücher.example');
 })->throws(InvalidHostPattern::class);
 
+it('rejects broken constraints and repeated parameters', function () {
+    expect(fn () => HostPattern::parse('{a}.x.test', ['a' => '[unclosed']))->toThrow(InvalidHostPattern::class, 'regular expression')
+        ->and(fn () => HostPattern::parse('{a}.{a}.x.test'))->toThrow(InvalidHostPattern::class, 'twice');
+});
+
 it('rejects malformed patterns', function (string $raw) {
     HostPattern::parse($raw);
 })->throws(InvalidHostPattern::class)->with(['', '{a', 'exa mple.com', '{a}{b}.example.com']);

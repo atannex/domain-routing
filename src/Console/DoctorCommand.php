@@ -69,11 +69,11 @@ final class DoctorCommand extends Command
             $this->warning("APP_URL host [{$appHost}] is served by no site, so it will answer 404.");
         }
 
-        if ($sites->hasDynamic() && ! config('domain-routing.strict_routes')) {
+        if ($sites->hasDynamic() && config('domain-routing.unsited_routes', 'static') === 'everywhere') {
             $unsited = collect(app('router')->getRoutes()->getRoutes())->filter(fn ($route) => SiteValidator::siteOf($route->action) === null)->count();
 
             if ($unsited > 0) {
-                $this->warning("{$unsited} route(s) belong to no site and are reachable on dynamic (tenant) hosts too; set strict_routes or put them on a site.");
+                $this->warning("{$unsited} route(s) belong to no site and are reachable on dynamic (tenant) hosts too; set unsited_routes to static or put them on a site.");
             }
         }
 
@@ -104,6 +104,20 @@ final class DoctorCommand extends Command
                 }
             } catch (Throwable $e) {
                 $this->failure('The handoff cache store is unavailable: '.$e->getMessage());
+            }
+        }
+
+        $names = [];
+
+        foreach (app('router')->getRoutes()->getRoutes() as $route) {
+            if (($name = $route->getName()) !== null) {
+                $names[$name][] = SiteValidator::siteOf($route->action) ?? '(no site)';
+            }
+        }
+
+        foreach ($names as $name => $owners) {
+            if (count($owners) > 1) {
+                $this->failure("Route name [{$name}] is used ".count($owners).' times ('.implode(', ', array_unique($owners)).'); route() can only reach one of them.');
             }
         }
 

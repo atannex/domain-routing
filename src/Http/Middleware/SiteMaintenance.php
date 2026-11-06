@@ -33,7 +33,7 @@ final class SiteMaintenance
         $cookie = MaintenanceStore::cookie($site);
         $expected = $down['secret'] ? hash_hmac('sha256', $site.'|'.$down['secret'], (string) config('app.key')) : null;
 
-        if ($expected !== null && trim($request->getPathInfo(), '/') === $down['secret']) {
+        if ($expected !== null && hash_equals((string) $down['secret'], trim($request->getPathInfo(), '/'))) {
             return (new RedirectResponse('/'))->withCookie(new Cookie($cookie, $expected, now()->addHours(12), '/', null, $request->isSecure(), true, false, 'lax'));
         }
 

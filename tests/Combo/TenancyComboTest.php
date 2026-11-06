@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Atannex\DomainRouting\Integrations\Tenancy\TenancyHostProvider;
+use Atannex\DomainRouting\Routing\SiteRoutes;
 use Atannex\DomainRouting\Sites\SiteRegistry;
 use Atannex\DomainRouting\Tests\Combo\TenancyTestCase;
 use Atannex\DomainRouting\Tests\Fixtures\Controllers\EchoController;
@@ -61,8 +62,25 @@ it('links to the current tenant inside a tenant request', function () {
     $this->get('http://acme-shop.example/link')->assertSee('http://acme-shop.example/orders');
 });
 
-it('prepends tenancy middleware to the tenant site', function () {
-    expect(app(SiteRegistry::class)->get('tenant')->middleware)->toBe(['tenant', 'web']);
+it('puts tenancy middleware in front on the tenant site only', function () {
+    $sites = app(SiteRegistry::class);
+
+    expect(SiteRoutes::middleware($sites->get('tenant')))->toBe(['tenant', 'web'])
+        ->and(SiteRoutes::middleware($sites->get('central')))->toBe(['web']);
+});
+
+it('keeps central routes off tenant domains, except shared paths and package endpoints', function () {
+    Route::get('/admin', fn () => 'admin panel');
+    Route::get('/livewire/update', fn () => 'livewire');
+
+    $this->get('http://central.test/admin')->assertSee('admin panel');
+    $this->get('http://acme-shop.example/admin')->assertNotFound();
+    $this->get('http://acme.central.test/admin')->assertNotFound();
+    $this->get('http://acme-shop.example/livewire/update')->assertSee('livewire');
+});
+
+it('serves the handoff endpoint on tenant domains', function () {
+    $this->get('http://acme-shop.example/_handoff?t=bad')->assertForbidden();
 });
 
 it('meets the HostProvider contract', function () {

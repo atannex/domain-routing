@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Atannex\DomainRouting\Integrations\Tenancy;
 
 use Atannex\DomainRouting\Hosts\Extensions;
-use Atannex\DomainRouting\Sites\SiteRegistry;
 use Atannex\Tenancy\Tenancy;
 
 /** Switches on when atannex/tenancy is installed. Identification stays tenancy's job. */
@@ -21,15 +20,21 @@ final class TenancyIntegration
         return (string) config('domain-routing.integrations.tenancy.site', 'tenant');
     }
 
-    public static function register(Extensions $extensions, SiteRegistry $sites): void
+    public static function register(Extensions $extensions): void
     {
         $extensions->addProvider(TenancyHostProvider::class);
         $extensions->addParameters(TenancyHostParameters::class);
+    }
+
+    /** Tenancy's identification runs first on the tenant site (before sessions and auth). */
+    public static function middleware(string $site): ?string
+    {
+        if ($site !== self::site() || ! self::available()) {
+            return null;
+        }
 
         $middleware = config('domain-routing.integrations.tenancy.middleware', 'tenant');
 
-        if (is_string($middleware) && $middleware !== '' && $sites->has(self::site())) {
-            $sites->replace($sites->get(self::site())->withPrependedMiddleware($middleware));
-        }
+        return is_string($middleware) && $middleware !== '' ? $middleware : null;
     }
 }

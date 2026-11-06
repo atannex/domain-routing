@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Atannex\DomainRouting\Attributes;
 
+use Atannex\DomainRouting\Routing\SiteRoutes;
 use Atannex\DomainRouting\Sites\SiteRegistry;
 use Atannex\Routing\Contracts\RouteModifier;
 use Atannex\Routing\Definition\RouteDefinition;
@@ -23,7 +24,7 @@ final class Site implements RouteModifier
         $site = app(SiteRegistry::class)->get($this->name);
 
         $route->meta['site'] = $site->name;
-        $route->middleware($site->middleware);
+        $route->middleware(SiteRoutes::middleware($site));
 
         if (config('domain-routing.route_names', 'prefix') === 'prefix' && ! str_starts_with($route->namePrefix, $site->name.'.')) {
             $route->namePrefix = $site->name.'.'.$route->namePrefix;

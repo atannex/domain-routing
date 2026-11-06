@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Atannex\DomainRouting\Tests\Fixtures\Controllers\EchoController;
+use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Route;
 
 it('serves the same URI per site', function () {
@@ -27,14 +28,30 @@ it('can skip host parameter binding', function () {
     $this->get('http://acme.app.test/dashboard')->assertJson(['parameters' => []]);
 });
 
-it('keeps unsited routes on every site, or none when strict', function () {
+it('serves unsited routes on static sites by default, or nowhere when told', function () {
     Route::get('/shared', EchoController::class);
     $this->get('http://api.atannex.test/shared')->assertOk();
 
-    $this->withSettings(['domain-routing.strict_routes' => true]);
+    $this->withSettings(['domain-routing.unsited_routes' => 'none']);
     Route::get('/shared', EchoController::class);
     $this->get('http://api.atannex.test/shared')->assertNotFound();
     $this->get('http://10.0.0.1/shared')->assertNotFound(); // unknown host → abort
+});
+
+it('keeps fallback routes per site', function () {
+    Route::site('marketing', fn () => Route::fallback(fn () => 'marketing fallback'));
+    Route::site('api', fn () => Route::fallback(fn () => response('api fallback', 404)));
+
+    $this->get('http://atannex.test/nope')->assertSee('marketing fallback');
+    $this->get('http://api.atannex.test/nope')->assertNotFound()->assertSee('api fallback');
+});
+
+it('offers an @site Blade directive', function () {
+    Route::site('api', fn () => Route::get('/blade', fn () => Blade::render('@site(\'api\') on api @else elsewhere @endsite')));
+    Route::site('marketing', fn () => Route::get('/blade', fn () => Blade::render('@site(\'api\') on api @else elsewhere @endsite')));
+
+    $this->get('http://api.atannex.test/blade')->assertSee('on api');
+    $this->get('http://atannex.test/blade')->assertSee('elsewhere');
 });
 
 it('can leave route names unprefixed', function () {
@@ -46,7 +63,8 @@ it('can leave route names unprefixed', function () {
 
 it('loads route files named in the site config', function () {
     $file = sys_get_temp_dir().'/dr-routes-'.getmypid().'.php';
-    file_put_contents($file, '<?php use Illuminate\Support\Facades\Route; Route::get("/from-file", '.EchoController::class.'::class)->name("file");');
+    file_put_contents($file, '<?php use Illuminate\Support\Facades\Blade;
+use Illuminate\Support\Facades\Route; Route::get("/from-file", '.EchoController::class.'::class)->name("file");');
 
     $this->withSites(['api' => ['hosts' => ['api.atannex.test'], 'routes' => [$file]]]);
 

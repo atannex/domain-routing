@@ -35,6 +35,7 @@ use Illuminate\Routing\CompiledRouteCollection;
 use Illuminate\Routing\Events\RouteMatched;
 use Illuminate\Routing\RouteCollection;
 use Illuminate\Routing\Router;
+use Illuminate\Routing\UrlGenerator;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\ServiceProvider;
@@ -64,6 +65,12 @@ final class DomainRoutingServiceProvider extends ServiceProvider
 
         $this->registerUrlGenerator();
 
+        // Lets ResolveSite put back whatever root the app forced before it.
+        UrlGenerator::macro('domainRoutingForcedRoot', function (): ?string {
+            /** @var UrlGenerator $this */
+            return $this->forcedRoot;
+        });
+
         $router = $this->app['router'];
         $routes = $router->getRoutes();
 
@@ -78,7 +85,8 @@ final class DomainRoutingServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $config = $this->app['config'];
-        SiteValidator::$strict = (bool) $config->get('domain-routing.strict_routes', false);
+        SiteValidator::$unsited = (string) $config->get('domain-routing.unsited_routes', SiteValidator::STATIC);
+        SiteValidator::$shared = array_values(array_map('strval', (array) $config->get('domain-routing.shared_routes', [])));
 
         $extensions = $this->app->make(Extensions::class);
 
@@ -91,7 +99,7 @@ final class DomainRoutingServiceProvider extends ServiceProvider
         }
 
         if (TenancyIntegration::available()) {
-            TenancyIntegration::register($extensions, $this->app->make(SiteRegistry::class));
+            TenancyIntegration::register($extensions);
         }
 
         $this->registerMiddleware();
@@ -104,7 +112,22 @@ final class DomainRoutingServiceProvider extends ServiceProvider
             }
         });
 
-        $this->app->booted(fn () => $this->app->make(SiteRegistry::class)->freeze());
+        // After every provider has booted, so sites defined in the app's own providers count too.
+        $this->app->booted(function (): void {
+            $sites = $this->app->make(SiteRegistry::class);
+
+            EncryptCookies::except(array_map(fn ($site) => MaintenanceStore::cookie($site), array_keys($sites->all())));
+
+            if (! $this->app->routesAreCached()) {
+                SiteRoutes::load($this->app['router'], $sites);
+            }
+
+            $sites->freeze();
+        });
+
+        $this->callAfterResolving('blade.compiler', function ($blade): void {
+            $blade->if('site', fn (string ...$names) => $this->app->make(SiteContext::class)->is(...$names));
+        });
 
         if ($this->app->runningInConsole()) {
             $this->publishes([__DIR__.'/../config/domain-routing.php' => config_path('domain-routing.php')], 'domain-routing-config');
@@ -169,8 +192,6 @@ final class DomainRoutingServiceProvider extends ServiceProvider
         if ($this->app['config']->get('domain-routing.stamps.enabled')) {
             $router->pushMiddlewareToGroup('web', EnsureSessionStamp::class);
         }
-
-        EncryptCookies::except(array_map(fn ($site) => MaintenanceStore::cookie($site), array_keys($this->app->make(SiteRegistry::class)->all())));
     }
 
     private function registerRoutes(): void
@@ -178,18 +199,15 @@ final class DomainRoutingServiceProvider extends ServiceProvider
         $config = $this->app['config'];
         $router = $this->app['router'];
 
+        // The package's own endpoints answer on every site, dynamic ones included.
         if ($config->get('domain-routing.handoff.enabled')) {
-            $router->get(trim((string) $config->get('domain-routing.handoff.path', '_handoff'), '/'), HandoffController::class)
+            $router->group(['site' => SiteValidator::ANY], fn () => $router->get(trim((string) $config->get('domain-routing.handoff.path', '_handoff'), '/'), HandoffController::class)
                 ->middleware((array) $config->get('domain-routing.handoff.middleware', ['web']))
-                ->name('domain-routing.handoff');
+                ->name('domain-routing.handoff'));
         }
 
         if ($config->get('domain-routing.robots.enabled')) {
-            $router->get('robots.txt', RobotsController::class)->name('domain-routing.robots');
-        }
-
-        if (! $this->app->routesAreCached()) {
-            $this->app->booted(fn () => SiteRoutes::load($router, $this->app->make(SiteRegistry::class)));
+            $router->group(['site' => SiteValidator::ANY], fn () => $router->get('robots.txt', RobotsController::class)->name('domain-routing.robots'));
         }
     }
 

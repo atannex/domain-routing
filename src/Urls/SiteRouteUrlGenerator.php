@@ -49,7 +49,9 @@ final class SiteRouteUrlGenerator extends RouteUrlGenerator
         }
 
         // Same host as the request: exactly what Laravel would build.
-        if (HostNormalizer::normalize($this->request->getHost()) === $resolved->host && $this->portMatches($site)) {
+        if (HostNormalizer::normalize($this->request->getHost()) === $resolved->host
+            && $this->request->getScheme() === $builder->scheme($site)
+            && $this->portMatches($site)) {
             return null;
         }
 

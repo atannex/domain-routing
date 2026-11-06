@@ -30,6 +30,7 @@ abstract class TenancyTestCase extends ComboTestCase
         parent::defineEnvironment($app);
 
         $app['config']->set('tenancy.identification.central_domains', ['central.test']);
+        $app['config']->set('domain-routing.handoff.enabled', true);
         $app['config']->set('tenancy.database.sqlite_path', sys_get_temp_dir().'/dr-tenancy-'.getmypid());
     }
 }

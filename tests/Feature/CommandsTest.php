@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Atannex\DomainRouting\Hosts\IndexCache;
+use Illuminate\Support\Facades\Route;
 
 it('lists sites', function () {
     $this->artisan('domains:list')->expectsOutputToContain('{account}.app.test')->assertSuccessful();
@@ -30,6 +31,14 @@ it('caches and clears the host index, and the doctor spots a stale cache', funct
 
     $this->artisan('domains:clear')->assertSuccessful();
     expect(app(IndexCache::class)->exists())->toBeFalse();
+});
+
+it('reports route names used on more than one site', function () {
+    $this->withSettings(['domain-routing.route_names' => 'none']);
+    Route::site('marketing', fn () => Route::get('/', fn () => 'm')->name('home'));
+    Route::site('api', fn () => Route::get('/', fn () => 'a')->name('home'));
+
+    $this->artisan('domains:doctor')->expectsOutputToContain('Route name [home]')->assertFailed();
 });
 
 it('reports ambiguous hosts and a bad default', function () {
