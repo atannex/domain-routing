@@ -46,9 +46,10 @@ final class DomainRouting
         return $this->app->make(SiteContext::class)->is(...$names);
     }
 
-    public function resolve(string $host): ?SiteMatch
+    /** $port: the port asked of ("127.0.0.1:8001" works too); sites served on one port need it. */
+    public function resolve(string $host, ?int $port = null): ?SiteMatch
     {
-        return $this->app->make(SiteResolver::class)->resolve($host);
+        return $this->app->make(SiteResolver::class)->resolve($host, $port);
     }
 
     /**

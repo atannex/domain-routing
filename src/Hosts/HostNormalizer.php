@@ -25,6 +25,15 @@ final class HostNormalizer
         return $host;
     }
 
+    /** The port written on a host ("127.0.0.1:8001" → 8001), or null when it names none. */
+    public static function port(string $host): ?int
+    {
+        $host = (string) preg_replace('#^[a-z][a-z0-9+.-]*://#i', '', trim($host));
+        $host = explode('/', $host, 2)[0];
+
+        return preg_match('/:(\d{1,5})$/', $host, $m) === 1 ? (int) $m[1] : null;
+    }
+
     /** One or more DNS labels (a-z, 0-9, inner hyphens), 253 chars at most. IPv4 passes; IPv6 literals do not. */
     public static function isValid(string $host): bool
     {

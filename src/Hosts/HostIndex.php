@@ -7,7 +7,10 @@ namespace Atannex\DomainRouting\Hosts;
 use Atannex\DomainRouting\Exceptions\AmbiguousHostPatterns;
 use Atannex\DomainRouting\Sites\Site;
 
-/** @internal Exact hosts in a hash map; parameterised patterns most-literal first. */
+/**
+ * @internal Exact hosts in a hash map; parameterised patterns most-literal first.
+ * A host served on one port is keyed "host:port", so sites can share an address.
+ */
 final class HostIndex
 {
     /**
@@ -32,8 +35,10 @@ final class HostIndex
         foreach ($sites as $site) {
             foreach ($site->patterns() as $pattern) {
                 if ($pattern->isExact()) {
-                    if (isset($exact[$pattern->pattern]) && $exact[$pattern->pattern] !== $site->name) {
-                        $error = AmbiguousHostPatterns::between($exact[$pattern->pattern], $site->name, $pattern->pattern);
+                    $key = isset($site->ports[$pattern->pattern]) ? $pattern->pattern.':'.$site->ports[$pattern->pattern] : $pattern->pattern;
+
+                    if (isset($exact[$key]) && $exact[$key] !== $site->name) {
+                        $error = AmbiguousHostPatterns::between($exact[$key], $site->name, $key);
 
                         if ($strict) {
                             throw $error;
@@ -44,7 +49,7 @@ final class HostIndex
                         continue;
                     }
 
-                    $exact[$pattern->pattern] = $site->name;
+                    $exact[$key] = $site->name;
 
                     continue;
                 }
@@ -73,8 +78,12 @@ final class HostIndex
     }
 
     /** @return array{site: string, parameters: array<string, string>, kind: 'exact'|'pattern'}|null */
-    public function match(string $host): ?array
+    public function match(string $host, ?int $port = null): ?array
     {
+        if ($port !== null && isset($this->exact[$host.':'.$port])) {
+            return ['site' => $this->exact[$host.':'.$port], 'parameters' => [], 'kind' => 'exact'];
+        }
+
         if (isset($this->exact[$host])) {
             return ['site' => $this->exact[$host], 'parameters' => [], 'kind' => 'exact'];
         }
@@ -94,7 +103,9 @@ final class HostIndex
     /** @return list<string> regexes (without delimiters) for Request::setTrustedHosts() */
     public function regexes(): array
     {
-        $regexes = array_map(fn (string $host) => '^'.preg_quote($host, '#').'$', array_keys($this->exact));
+        // Trusted hosts never carry the port.
+        $hosts = array_unique(array_map(fn (string $key) => (string) preg_replace('/:\d+$/', '', $key), array_keys($this->exact)));
+        $regexes = array_values(array_map(fn (string $host) => '^'.preg_quote($host, '#').'$', $hosts));
 
         foreach ($this->patterns as [$pattern, , $where]) {
             $regex = HostPattern::parse($pattern, $where)->regex();

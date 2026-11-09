@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Atannex\DomainRouting\Sites;
 
+use Atannex\DomainRouting\Exceptions\InvalidHostPattern;
 use Atannex\DomainRouting\Hosts\HostNormalizer;
 use Atannex\DomainRouting\Hosts\HostPattern;
 
@@ -22,6 +23,7 @@ final readonly class Site
      * @param  array<string, mixed>  $meta
      * @param  array<string, mixed>  $config
      * @param  list<string>  $views
+     * @param  array<string, int>  $ports  exact host => the one port it is served on ("127.0.0.1:8001")
      */
     public function __construct(
         public string $name,
@@ -44,6 +46,7 @@ final readonly class Site
         public bool $stateful = false,
         public bool $tls = false,
         public bool $reserved = true,
+        public array $ports = [],
     ) {}
 
     /**
@@ -56,8 +59,10 @@ final readonly class Site
         $dynamic = in_array(self::DYNAMIC, $hosts, true);
         $hosts = array_values(array_filter($hosts, fn (string $host) => $host !== self::DYNAMIC));
         $where = (array) ($config['where'] ?? []);
+        [$hosts, $ports] = self::splitPorts($name, $hosts);
 
         $hosts = array_values(array_unique(array_map(fn (string $host) => HostPattern::parse($host, $where)->pattern, $hosts)));
+        $ports = array_combine(array_map(fn (string $host) => HostPattern::parse($host, $where)->pattern, array_keys($ports)), $ports);
         $canonical = isset($config['canonical']) ? HostPattern::parse((string) $config['canonical'], $where)->pattern : null;
 
         return new self(
@@ -66,7 +71,8 @@ final readonly class Site
             dynamic: $dynamic,
             canonical: $canonical,
             scheme: isset($config['scheme']) ? (string) $config['scheme'] : null,
-            port: isset($config['port']) ? (int) $config['port'] : null,
+            // A host written with a port ("127.0.0.1:8001") is also where links to the site point.
+            port: isset($config['port']) ? (int) $config['port'] : (count(array_unique($ports)) === 1 ? (int) reset($ports) : null),
             routes: array_values(array_map('strval', (array) ($config['routes'] ?? []))),
             middleware: array_values(array_map('strval', (array) ($config['middleware'] ?? []))),
             where: $where,
@@ -81,7 +87,46 @@ final readonly class Site
             stateful: (bool) ($config['stateful'] ?? false),
             tls: (bool) ($config['tls'] ?? false),
             reserved: (bool) ($config['reserved_labels'] ?? true),
+            ports: $ports,
         );
+    }
+
+    /**
+     * "127.0.0.1:8001" → host "127.0.0.1", served only on port 8001, so several
+     * sites can share one address on different ports (one port per site in development).
+     *
+     * @param  list<string>  $hosts
+     * @return array{0: list<string>, 1: array<string, int>}
+     */
+    private static function splitPorts(string $site, array $hosts): array
+    {
+        $plain = [];
+        $ports = [];
+
+        foreach ($hosts as $host) {
+            $port = HostNormalizer::port($host);
+
+            if ($port === null) {
+                $plain[] = $host;
+
+                continue;
+            }
+
+            $bare = (string) preg_replace('/:\d+$/', '', trim($host));
+
+            if (str_contains($bare, '{')) {
+                throw InvalidHostPattern::for($host, "a port is allowed on exact hosts only (site [{$site}])");
+            }
+
+            if ($port < 1 || $port > 65535) {
+                throw InvalidHostPattern::for($host, 'the port must be between 1 and 65535');
+            }
+
+            $plain[] = $bare;
+            $ports[$bare] = $port;
+        }
+
+        return [$plain, $ports];
     }
 
     /**
@@ -157,7 +202,7 @@ final readonly class Site
         }
 
         return new self($this->name, $this->hosts, $this->dynamic, $this->canonical, $this->scheme, $this->port, $this->routes,
-            [$middleware, ...$this->middleware], $this->where, $this->session, $this->redirects, $this->robots, $this->assetUrl, $this->meta, $this->unsited, $this->config, $this->views, $this->stateful, $this->tls, $this->reserved);
+            [$middleware, ...$this->middleware], $this->where, $this->session, $this->redirects, $this->robots, $this->assetUrl, $this->meta, $this->unsited, $this->config, $this->views, $this->stateful, $this->tls, $this->reserved, $this->ports);
     }
 
     /** Is the given host (already normalised) one of this site's exact hosts? */

@@ -61,7 +61,7 @@ final class Handoffs
         $request = request();
         $from = $this->origin($request);
 
-        if (! $this->allowedHost($request->getHost()) || ! $request->hasSession()) {
+        if (! $this->allowedHost($request->getHost(), port: (int) $request->getPort()) || ! $request->hasSession()) {
             throw InvalidHandoffTarget::for($from);
         }
 
@@ -94,7 +94,7 @@ final class Handoffs
             'n' => is_string($request->query('n')) ? $request->query('n') : null,
         ]));
 
-        if (! $this->allowedHost($request->getHost())) {
+        if (! $this->allowedHost($request->getHost(), port: (int) $request->getPort())) {
             return $this->reject(RejectionReason::UnknownHost, $request);
         }
 
@@ -115,7 +115,7 @@ final class Handoffs
             return $this->reject(RejectionReason::Malformed, $request);
         }
 
-        if (! $this->allowedHost($request->getHost())) {
+        if (! $this->allowedHost($request->getHost(), port: (int) $request->getPort())) {
             return $this->reject(RejectionReason::UnknownHost, $request);
         }
 
@@ -175,7 +175,7 @@ final class Handoffs
             return $this->reject(RejectionReason::NoSession, $request);
         }
 
-        if (! $this->allowedHost($request->getHost())) {
+        if (! $this->allowedHost($request->getHost(), port: (int) $request->getPort())) {
             return $this->reject(RejectionReason::UnknownHost, $request);
         }
 
@@ -259,7 +259,7 @@ final class Handoffs
         $scheme = strtolower((string) ($parts['scheme'] ?? ''));
         $host = HostNormalizer::normalize((string) ($parts['host'] ?? ''));
 
-        if (! in_array($scheme, ['http', 'https'], true) || isset($parts['user']) || ! $this->allowedHost($host, $authorize)) {
+        if (! in_array($scheme, ['http', 'https'], true) || isset($parts['user']) || ! $this->allowedHost($host, $authorize, isset($parts['port']) ? (int) $parts['port'] : null)) {
             throw InvalidHandoffTarget::for($url);
         }
 
@@ -276,7 +276,7 @@ final class Handoffs
     /** The site (and its host values) an origin belongs to: www and apex of one site are the same target. */
     private function siteKey(string $origin): string
     {
-        $match = $this->resolver->resolve((string) parse_url($origin, PHP_URL_HOST));
+        $match = $this->resolver->resolve((string) parse_url($origin, PHP_URL_HOST), parse_url($origin, PHP_URL_PORT) ?: null);
 
         return $match === null ? '' : $match->name().'|'.json_encode($match->parameters);
     }
@@ -302,9 +302,9 @@ final class Handoffs
      * controlled by the tenant's DNS) unless handoff.dynamic is on and the
      * authorizer agrees.
      */
-    private function allowedHost(string $host, bool $authorize = false): bool
+    private function allowedHost(string $host, bool $authorize = false, ?int $port = null): bool
     {
-        $match = $this->resolver->resolve($host);
+        $match = $this->resolver->resolve($host, $port);
 
         if ($match === null) {
             return false;

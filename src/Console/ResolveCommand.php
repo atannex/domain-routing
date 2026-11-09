@@ -10,7 +10,7 @@ use Illuminate\Console\Command;
 
 final class ResolveCommand extends Command
 {
-    protected $signature = 'domains:resolve {host : The host to explain}';
+    protected $signature = 'domains:resolve {host : The host to explain (host:port for a site served on one port)}';
 
     protected $description = 'Explain which site serves a host, and why';
 
@@ -25,7 +25,8 @@ final class ResolveCommand extends Command
             return self::FAILURE;
         }
 
-        $match = $resolver->resolve($host);
+        $port = HostNormalizer::port($raw);
+        $match = $resolver->resolve($host, $port);
 
         if ($match === null) {
             $this->warn("No site serves [{$host}]. Policy: ".config('domain-routing.unmatched', 'abort').'.');
@@ -34,7 +35,7 @@ final class ResolveCommand extends Command
         }
 
         $this->table(['Field', 'Value'], [
-            ['Host', $host],
+            ['Host', $host.($port !== null ? ':'.$port : '')],
             ['Site', $match->name()],
             ['Matched by', match ($match->source) {
                 'exact' => 'exact host',

@@ -117,7 +117,7 @@ final class SiteRegistry
     /** Fingerprint of everything the host index is built from. */
     public function hash(): string
     {
-        return md5((string) json_encode(array_map(fn (Site $s) => [$s->hosts, $s->where, $s->dynamic], $this->sites)));
+        return md5((string) json_encode(array_map(fn (Site $s) => [$s->hosts, $s->where, $s->dynamic, $s->ports], $this->sites)));
     }
 
     /** Where the compiled index lives and whether ambiguity throws (local/testing) or is only recorded. */

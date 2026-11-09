@@ -53,7 +53,7 @@ final class ResolveSite
             return $next($request);
         }
 
-        $match = $this->resolver->resolve($request->getHost());
+        $match = $this->resolver->resolve($request->getHost(), (int) $request->getPort());
 
         if ($match === null) {
             $this->events->dispatch(new SiteNotResolved(HostNormalizer::normalize($request->getHost())));

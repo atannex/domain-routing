@@ -10,20 +10,22 @@ use Atannex\DomainRouting\Hosts\HostNormalizer;
 use Atannex\DomainRouting\Sites\SiteRegistry;
 use Throwable;
 
-/** @internal Host → site: static index first, then HostProviders. No HTTP here. */
+/** @internal Host (and port) → site: static index first, then HostProviders. No HTTP here. */
 final class SiteResolver
 {
     public function __construct(private readonly SiteRegistry $sites, private readonly Extensions $extensions) {}
 
-    public function resolve(string $host): ?SiteMatch
+    /** $port: the port asked of; read from "host:port" when not given. A site served on that port wins. */
+    public function resolve(string $host, ?int $port = null): ?SiteMatch
     {
+        $port ??= HostNormalizer::port($host);
         $host = HostNormalizer::normalize($host);
 
         if (! HostNormalizer::isValid($host)) {
             return null;
         }
 
-        if ($hit = $this->sites->index()->match($host)) {
+        if ($hit = $this->sites->index()->match($host, $port)) {
             return new SiteMatch($this->sites->get($hit['site']), $host, $hit['parameters'], $hit['kind']);
         }
 
